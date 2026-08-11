@@ -4,7 +4,7 @@ category: '[nut]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, ${audio_channels}, ${audio_rate}, False, 0, 0, ${command})
+  make: nut.nut_source(${uri}, ${audio_channels}, False, ${command})
 
 parameters:
 - id: command
@@ -20,10 +20,6 @@ parameters:
   label: Audio Channels
   dtype: int
   default: '1'
-- id: audio_rate
-  label: Audio Rate (Hz)
-  dtype: int
-  default: '48000'
 
 outputs:
 - label: audio
@@ -34,7 +30,6 @@ outputs:
 asserts:
 - ${command != '' or uri != ''}
 - ${audio_channels >= 1}
-- ${audio_rate > 0}
 
 documentation: |-
   Audio-only instance of nut.nut_source: ingests a raw-payload NUT stream
@@ -43,9 +38,13 @@ documentation: |-
   "NUT A/V Source" — the three GRC entries only differ in the declared
   stream layout.
 
-  Contract (a strict profile of NUT; any mismatch is a hard error at
-  start): pcm_f32le, interleaved, exactly Audio Channels @ Audio Rate, the
-  only stream in the container.
+  Contract (a strict profile of NUT; structural mismatches are hard
+  errors at start): pcm_f32le, interleaved, exactly Audio Channels
+  channels, the only stream in the container. The sample rate is read
+  from the stream headers and adopted at start (cap: 192 kHz) — your
+  ffmpeg command is the single source of truth, and the downstream
+  flowgraph (resampler ratios etc.) must match your command. The adopted
+  rate is available as audio_rate() after start.
 
   Two plumbing modes (exactly one of Spawn Command / NUT File must be
   set):
@@ -58,10 +57,9 @@ documentation: |-
     Anything goes (pipelines, curl | ffmpeg, extra filters) as long as
     stdout is contract-conforming NUT; validation at start is the
     guardrail. For seamless looping add -stream_loop -1 before -i.
-    The default command is ready to run against /tmp/song.mp3 and matches
-    the default block parameters; if you edit either side, keep the
-    command's -ac / aresample values in sync with Audio Channels / Audio
-    Rate (start-time validation catches any mismatch).
+    The default command is ready to run against /tmp/song.mp3 (mono @
+    48000 Hz); the command's -ac must match Audio Channels, and whatever
+    rate its aresample sets is what the block adopts.
   * NUT File (properties dialog; for users who know what they're doing):
     an externally started ffmpeg writes the FIFO/file named here. Same
     reference command, ending in "-f nut pipe:1 > FIFO".
@@ -69,7 +67,14 @@ documentation: |-
   The flowgraph sink (SDR/audio device) must be the only clock: do NOT add
   a Throttle; ffmpeg is paced purely by pipe backpressure (no -re).
 
-  Buffering: the block requests >= 1 s of buffer on each audio port
-  (deadlock prevention, see the block header docs) — do not shrink.
+  Buffering: each audio port defaults to a 192000-item buffer (1 s at the
+  192 kHz cap) via a plain set_min_output_buffer request — overridable in
+  the Advanced tab (Min Output Buffer, wins when non-zero) or from
+  Python. Warning: shrinking below the stream's interleave burst
+  (-max_interleave_delta) re-opens the demuxer-deadlock window these
+  defaults exist to close.
+
+  Full explanation of the buffering/synchronization design: see the
+  gr-nut README, section "Buffering & synchronization" (docs/buffering.md).
 
 file_format: 1

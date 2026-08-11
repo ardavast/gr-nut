@@ -44,6 +44,19 @@ constexpr size_t PRIME_MAX_PACKETS = 100000;
 constexpr size_t PRIME_MAX_BYTES = 256u * 1024 * 1024;
 const AVRational US_TB = { 1, 1000000 };
 
+// Buffer caps. The audio rate and video geometry are adopted from the NUT
+// headers at start(), but GR allocates stream buffers during tb.start()
+// flowgraph setup — BEFORE block::start() can read the headers — so
+// set_min_output_buffer cannot be deferred until the format is known. The
+// constructor therefore requests fixed generous caps, and start() fails
+// cleanly if the adopted format exceeds them. The size floor itself is the
+// §4.7 deadlock prevention: the NUT muxer bounds interleave skew
+// (-max_interleave_delta), so buffers larger than the maximum interleave
+// burst guarantee a synchronous downstream combiner can always be fed.
+constexpr int MAX_AUDIO_RATE = 192000; // buffer = 1 s of audio at this cap
+constexpr size_t MAX_FRAME_BYTES = size_t(1920) * 1080 * 3; // one 1080p rgb24 frame
+constexpr int VIDEO_BUFFER_FRAMES = 4; // >= 4 frames of buffer (~24.9 MB)
+
 std::string averr(int err)
 {
     char buf[AV_ERROR_MAX_STRING_SIZE] = { 0 };
@@ -65,18 +78,10 @@ const char* pix_fmt_name(int fmt)
 
 // Validates the constructor parameters and builds the output signature
 // (N float audio ports, then one byte video port if emit_video).
-std::vector<int>
-out_sizes(int audio_channels, int audio_rate, bool emit_video, int width, int height)
+std::vector<int> out_sizes(int audio_channels, bool emit_video)
 {
     if (audio_channels < 0)
         throw std::invalid_argument("nut_source: audio_channels must be >= 0");
-    if (audio_channels > 0 && audio_rate <= 0)
-        throw std::invalid_argument(
-            "nut_source: audio_rate must be > 0 when audio_channels > 0");
-    if (emit_video && (width <= 0 || height <= 0))
-        throw std::invalid_argument(
-            "nut_source: video_width and video_height must be > 0 when emit_video is "
-            "set");
     if (audio_channels == 0 && !emit_video)
         throw std::invalid_argument(
             "nut_source: block would have no outputs — set audio_channels > 0 and/or "
@@ -91,46 +96,29 @@ out_sizes(int audio_channels, int audio_rate, bool emit_video, int width, int he
 
 nut_source::sptr nut_source::make(const std::string& uri,
                                   int audio_channels,
-                                  int audio_rate,
                                   bool emit_video,
-                                  int video_width,
-                                  int video_height,
                                   const std::string& command)
 {
-    return gnuradio::make_block_sptr<nut_source_impl>(uri,
-                                                      audio_channels,
-                                                      audio_rate,
-                                                      emit_video,
-                                                      video_width,
-                                                      video_height,
-                                                      command);
+    return gnuradio::make_block_sptr<nut_source_impl>(
+        uri, audio_channels, emit_video, command);
 }
 
 nut_source_impl::nut_source_impl(const std::string& uri,
                                  int audio_channels,
-                                 int audio_rate,
                                  bool emit_video,
-                                 int video_width,
-                                 int video_height,
                                  const std::string& command)
     : gr::block("nut_source",
                 gr::io_signature::make(0, 0, 0),
-                gr::io_signature::makev(
-                    audio_channels + (emit_video ? 1 : 0),
-                    audio_channels + (emit_video ? 1 : 0),
-                    out_sizes(
-                        audio_channels, audio_rate, emit_video, video_width, video_height))),
+                gr::io_signature::makev(audio_channels + (emit_video ? 1 : 0),
+                                        audio_channels + (emit_video ? 1 : 0),
+                                        out_sizes(audio_channels, emit_video))),
       d_uri(uri),
       d_nchan(audio_channels),
-      d_rate(audio_rate),
       d_emit_video(emit_video),
-      d_width(video_width),
-      d_height(video_height),
       d_command(command),
       d_spawn(uri.empty()),
       d_video_port(audio_channels),
-      d_nports(audio_channels + (emit_video ? 1 : 0)),
-      d_frame_bytes(emit_video ? size_t(video_width) * video_height * 3 : 0)
+      d_nports(audio_channels + (emit_video ? 1 : 0))
 {
     if (uri.empty() && command.empty())
         throw std::invalid_argument(
@@ -150,14 +138,14 @@ nut_source_impl::nut_source_impl(const std::string& uri,
     if (!d_rd_pkt || !d_a_pkt || !d_v_pkt)
         throw std::runtime_error("nut_source: av_packet_alloc failed");
 
-    // Deadlock prevention by buffer sizing (see block docs / design §4.7):
-    // the NUT muxer bounds interleave skew, so output buffers larger than
-    // the maximum interleave burst guarantee the demuxer can always flush
-    // one stream's burst and reach the other stream's next packet.
+    // Fixed generous buffer caps (see MAX_* above): buffers must be sized
+    // here — GR allocates them during tb.start() flowgraph setup, before
+    // start() can read the stream headers — and the sizing is what prevents
+    // the §4.7 demuxer deadlock.
     for (int i = 0; i < d_nchan; i++)
-        set_min_output_buffer(i, d_rate); // >= 1 s of audio per port
+        set_min_output_buffer(i, MAX_AUDIO_RATE); // 1 s of audio at the cap
     if (d_emit_video)
-        set_min_output_buffer(d_video_port, 4 * d_frame_bytes); // >= 4 frames
+        set_min_output_buffer(d_video_port, VIDEO_BUFFER_FRAMES * MAX_FRAME_BYTES);
 }
 
 nut_source_impl::~nut_source_impl()
@@ -462,7 +450,7 @@ void nut_source_impl::open_input()
     }
 
     try {
-        validate_streams();
+        validate_and_adopt_streams();
     } catch (...) {
         close_input();
         throw;
@@ -471,7 +459,7 @@ void nut_source_impl::open_input()
     d_priming = (d_nchan > 0 && d_emit_video);
 }
 
-void nut_source_impl::validate_streams()
+void nut_source_impl::validate_and_adopt_streams()
 {
     int n_audio = 0, n_video = 0, n_other = 0;
     d_audio_idx = d_video_idx = -1;
@@ -500,32 +488,78 @@ void nut_source_impl::validate_streams()
         throw std::runtime_error(os.str());
     }
 
+    // Structural validation: codec and channel count are part of the
+    // instance shape. Rate and geometry are NOT validated — the ffmpeg
+    // command is the single source of truth; they are adopted below
+    // (subject only to the buffer caps).
+    std::ostringstream adopted;
     if (d_nchan > 0) {
         const AVCodecParameters* cp = d_fmt->streams[d_audio_idx]->codecpar;
         const int ch = cp->ch_layout.nb_channels;
-        if (cp->codec_id != AV_CODEC_ID_PCM_F32LE || cp->sample_rate != d_rate ||
-            ch != d_nchan) {
+        if (cp->codec_id != AV_CODEC_ID_PCM_F32LE || ch != d_nchan) {
             std::ostringstream os;
-            os << "nut_source: expected " << d_nchan << " audio channel(s) @ " << d_rate
-               << " Hz pcm_f32le, stream has " << ch << " channel(s) @ "
-               << cp->sample_rate << " Hz " << codec_name(cp->codec_id)
-               << " — fix the ffmpeg -ac/-ar/-c:a options" << hint;
+            os << "nut_source: expected " << d_nchan
+               << " audio channel(s) of pcm_f32le, stream has " << ch
+               << " channel(s) of " << codec_name(cp->codec_id)
+               << " — fix the ffmpeg -ac/-c:a options" << hint;
             throw std::runtime_error(os.str());
         }
+        if (cp->sample_rate <= 0) {
+            throw std::runtime_error(
+                "nut_source: audio stream declares no sample rate" +
+                std::string(hint));
+        }
+        if (cp->sample_rate > MAX_AUDIO_RATE) {
+            std::ostringstream os;
+            os << "nut_source: audio rate " << cp->sample_rate
+               << " Hz exceeds the built-in cap of " << MAX_AUDIO_RATE
+               << " Hz (output buffers are sized for 1 s at the cap before the "
+                  "headers are readable)"
+               << hint;
+            throw std::runtime_error(os.str());
+        }
+        d_rate = cp->sample_rate;
+        adopted << "audio " << d_rate << " Hz x" << d_nchan << "ch";
     }
 
     if (d_emit_video) {
         const AVCodecParameters* cp = d_fmt->streams[d_video_idx]->codecpar;
-        if (cp->codec_id != AV_CODEC_ID_RAWVIDEO || cp->format != AV_PIX_FMT_RGB24 ||
-            cp->width != d_width || cp->height != d_height) {
+        if (cp->codec_id != AV_CODEC_ID_RAWVIDEO || cp->format != AV_PIX_FMT_RGB24) {
             std::ostringstream os;
-            os << "nut_source: expected rawvideo/rgb24 " << d_width << "x" << d_height
-               << ", stream has " << codec_name(cp->codec_id) << "/"
-               << pix_fmt_name(cp->format) << " " << cp->width << "x" << cp->height
-               << " — fix the ffmpeg -c:v/-pix_fmt/scale options" << hint;
+            os << "nut_source: expected rawvideo/rgb24 video, stream has "
+               << codec_name(cp->codec_id) << "/" << pix_fmt_name(cp->format)
+               << " — fix the ffmpeg -c:v/-pix_fmt options" << hint;
             throw std::runtime_error(os.str());
         }
+        if (cp->width <= 0 || cp->height <= 0) {
+            throw std::runtime_error(
+                "nut_source: video stream declares no geometry" + std::string(hint));
+        }
+        const size_t frame_bytes = size_t(cp->width) * cp->height * 3;
+        if (frame_bytes > MAX_FRAME_BYTES) {
+            std::ostringstream os;
+            os << "nut_source: video frame " << cp->width << "x" << cp->height
+               << " rgb24 = " << frame_bytes
+               << " bytes exceeds the built-in cap of one 1920x1080 frame ("
+               << MAX_FRAME_BYTES
+               << " bytes); output buffers hold 4 cap-sized frames and are "
+                  "allocated before the headers are readable — scale the video "
+                  "down in the ffmpeg command"
+               << hint;
+            throw std::runtime_error(os.str());
+        }
+        d_width = cp->width;
+        d_height = cp->height;
+        d_frame_bytes = frame_bytes;
+        if (d_nchan > 0)
+            adopted << ", ";
+        adopted << "video " << d_width << "x" << d_height << " rgb24";
+        const AVRational fr = d_fmt->streams[d_video_idx]->avg_frame_rate;
+        if (fr.num > 0 && fr.den > 0)
+            adopted << " @ " << av_q2d(fr) << " fps";
     }
+
+    d_logger->info("adopted: {}", adopted.str());
 }
 
 void nut_source_impl::fail(const std::string& msg)
@@ -553,6 +587,9 @@ bool nut_source_impl::start()
         std::lock_guard<std::mutex> lock(d_error_mutex);
         d_error.clear();
     }
+    // Re-adopt the format from the (possibly new) stream on every start.
+    d_rate = d_width = d_height = 0;
+    d_frame_bytes = 0;
     // start() runs inside the block's scheduler thread; an exception here
     // would be swallowed by GR's thread wrapper, killing only this thread
     // while the rest of the flowgraph hangs. Convert failures to a logged

@@ -50,40 +50,6 @@ blocks:
     coordinate: [232, 8]
     rotation: 0
     state: enabled
-- name: width
-  id: parameter
-  parameters:
-    alias: ''
-    comment: ''
-    hide: none
-    label: Frame Width
-    short_id: ''
-    type: intx
-    value: '320'
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [392, 8]
-    rotation: 0
-    state: enabled
-- name: height
-  id: parameter
-  parameters:
-    alias: ''
-    comment: ''
-    hide: none
-    label: Frame Height
-    short_id: ''
-    type: intx
-    value: '240'
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [536, 8]
-    rotation: 0
-    state: enabled
 - name: outfile
   id: parameter
   parameters:
@@ -109,12 +75,12 @@ blocks:
     command: ''
     comment: 'video-only instance (audio_channels=0);
 
-      external mode: command overridden to empty'
+      external mode: command overridden to empty;
+
+      geometry adopted from the stream'
     maxoutbuf: '0'
     minoutbuf: '0'
     uri: uri
-    video_height: height
-    video_width: width
   states:
     bus_sink: false
     bus_source: false

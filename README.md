@@ -17,17 +17,26 @@ stock GR blocks (see `examples/` for a mono FM transmitter).
 |----------------|------------------------------------------------------------------------|
 | Container      | NUT, streamed (no seeking), read from a pipe/FIFO or file              |
 | Audio codec    | `pcm_f32le`, interleaved                                               |
-| Audio rate     | as declared to the block (default profile: 48000 Hz)                   |
-| Audio channels | as declared to the block                                               |
+| Audio rate     | read from the stream headers (adopted at start; cap 192 kHz)           |
+| Audio channels | as declared to the block (structural: fixes the port count)            |
 | Video codec    | `rawvideo`, pix_fmt `rgb24` (only if the block instance declares video)|
-| Video geometry | exactly the declared width × height; ffmpeg does ALL scaling           |
-| Video rate     | exactly the declared fps, CFR enforced                                 |
+| Video geometry | read from the stream headers (adopted at start; cap 1920×1080); ffmpeg does ALL scaling |
+| Video rate     | read from the stream headers; CFR enforced by ffmpeg (`-fps_mode cfr`) |
 | Stream layout  | exactly the declared set of streams — anything else is a hard error    |
 | Interleaving   | muxer bounds skew; always pass `-max_interleave_delta` explicitly      |
 
-The block **validates** this profile at `start()` and fails loudly on any
-mismatch — it never adapts. All flexibility lives on ffmpeg's input side;
-ffmpeg exists to conform arbitrary media to this profile.
+The block **validates the structure** of this profile at `start()` —
+stream kinds vs the instance shape, codecs, channel count — and fails
+loudly on any mismatch; it never adapts. The audio rate and video
+geometry are *not* validated but **adopted** from the headers: the ffmpeg
+command is the single source of truth, and making the downstream
+flowgraph match it (resampler ratios, consumer geometry) is the user's
+responsibility. Adopted values are exposed as `audio_rate()` /
+`video_width()` / `video_height()` (valid after the flowgraph has
+started; 0 before, or if the instance lacks that stream), and a
+mid-stream *change* of the adopted format remains a hard error. All
+flexibility lives on ffmpeg's input side; ffmpeg exists to conform
+arbitrary media to a fixed profile per run.
 
 Error model: GNU Radio cannot propagate exceptions out of a block thread
 (they would kill one thread and hang the rest of the flowgraph), so
@@ -85,18 +94,32 @@ stream timebase), `width`, `height`. Steady-state consumers must not
 *need* the tags (geometry is contractual); they exist for diagnostics and
 alignment.
 
-## Buffering (deadlock prevention — do not shrink)
+## Buffering & synchronization
 
-A multi-output demuxer with bounded output buffers can deadlock when
-downstream ends in a synchronous combiner: the demuxer blocks pushing
-stream A into a full buffer while the consumer starves for stream B, which
-the blocked demuxer would deliver next. Because the NUT muxer bounds
-interleave skew (`-max_interleave_delta`), buffers larger than the maximum
-interleave burst break the cycle. The block therefore requests
-`set_min_output_buffer` of **≥ 1 s** on each audio port and **≥ 4 frames**
-(4×W×H×3 bytes) on the video port. GR's default buffers are tens of kB
-while a raw frame is MBs — without this the video path would be broken out
-of the box.
+**Full reference: [docs/buffering.md](docs/buffering.md)** — the complete
+chain of reasoning (topology, clocking, NUT interleaving, the
+demuxer-deadlock cycle and why buffer sizing genuinely eliminates it,
+allocation timing, fine-tuning, failure modes). Read it before changing
+any buffer size or pacing behavior. The short version:
+
+- A multi-output demuxer with bounded buffers plus a synchronous
+  downstream combiner can deadlock; because the NUT muxer bounds
+  interleave skew (`-max_interleave_delta`), buffers larger than the
+  maximum interleave burst provably break the cycle.
+- Since the format is adopted from the headers *after* GR has already
+  allocated the buffers (allocation happens during `tb.start()` setup,
+  before `block::start()` runs), the block requests fixed generous
+  defaults in its constructor: **192000 items per audio port** (1 s at
+  the 192 kHz cap) and **4 × 1920×1080×3 bytes ≈ 24.9 MB** on the video
+  port. Streams beyond the caps fail promptly at start.
+- These are plain `set_min_output_buffer` requests and remain
+  overridable: call `set_min_output_buffer(...)` after construction in
+  Python, or set GRC's Advanced → *Min Output Buffer* (non-zero
+  overrides; GRC emits the setter after the make, so the untouched field
+  keeps the defaults). **Warning:** shrinking below the stream's
+  interleave burst re-opens the deadlock window the defaults exist to
+  close; `-max_interleave_delta` on the ffmpeg side is the other half of
+  that contract.
 
 ## Build
 
@@ -119,9 +142,17 @@ Python:
 
 ```python
 from gnuradio import nut
-src = nut.nut_source(uri="/tmp/stream.nut",
-                     audio_channels=1, audio_rate=48000,
-                     emit_video=False, video_width=0, video_height=0)
+src = nut.nut_source(uri="/tmp/stream.nut", audio_channels=1,
+                     emit_video=False)
+# or spawn mode:
+src = nut.nut_source(uri="", audio_channels=1, emit_video=False,
+                     command="ffmpeg -i song.flac -vn "
+                             "-af aresample=48000:async=1 -ac 1 "
+                             "-c:a pcm_f32le -max_interleave_delta 500000 "
+                             "-f nut pipe:1")
+# after tb.start(): src.audio_rate() / src.video_width() /
+# src.video_height() report the adopted format; src.last_error() is ""
+# on clean EOF and carries the actionable message on failure.
 ```
 
 GRC (category `[nut]`): three symmetric entries, all instantiating the

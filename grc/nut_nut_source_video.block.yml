@@ -4,7 +4,7 @@ category: '[nut]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, 0, 0, True, ${video_width}, ${video_height}, ${command})
+  make: nut.nut_source(${uri}, 0, True, ${command})
 
 parameters:
 - id: command
@@ -16,14 +16,6 @@ parameters:
   dtype: string
   default: ''
   hide: part
-- id: video_width
-  label: Video Width
-  dtype: int
-  default: '640'
-- id: video_height
-  label: Video Height
-  dtype: int
-  default: '480'
 
 outputs:
 - label: video
@@ -32,7 +24,6 @@ outputs:
 
 asserts:
 - ${command != '' or uri != ''}
-- ${video_width > 0 and video_height > 0}
 
 documentation: |-
   Video-only instance of nut.nut_source: ingests a raw-payload NUT stream
@@ -41,12 +32,14 @@ documentation: |-
   "NUT A/V Source" — the three GRC entries only differ in the declared
   stream layout.
 
-  Contract (a strict profile of NUT; any mismatch is a hard error at
-  start): rawvideo rgb24, exactly Width x Height, constant frame rate, the
-  only stream in the container. A stream tag ("pts" in the NUT stream
-  timebase, "width", "height") is attached to the first byte of every
-  frame; steady-state consumers must not need it (geometry is
-  contractual).
+  Contract (a strict profile of NUT; structural mismatches are hard
+  errors at start): rawvideo rgb24, constant frame rate, the only stream
+  in the container. The geometry is read from the stream headers and
+  adopted at start (cap: 1920x1080) — your ffmpeg command is the single
+  source of truth, and downstream consumers must match your command; the
+  adopted values are available as video_width()/video_height() after
+  start. A stream tag ("pts" in the NUT stream timebase, "width",
+  "height") is attached to the first byte of every frame.
 
   Two plumbing modes (exactly one of Spawn Command / NUT File must be
   set):
@@ -60,10 +53,8 @@ documentation: |-
         -max_interleave_delta 500000 -f nut pipe:1
     Validation at start is the guardrail. For seamless looping add
     -stream_loop -1 before -i. The default command is ready to run
-    against /tmp/video.mp4 and matches the default block parameters
-    (640x480 @ 25 fps); if you edit either side, keep the command's
-    scale/pad and fps values in sync with Video Width/Height (start-time
-    validation catches geometry mismatches).
+    against /tmp/video.mp4 and conforms it to 640x480 @ 25 fps; whatever
+    geometry/fps your command produces is what the block adopts.
   * NUT File (properties dialog; for users who know what they're doing):
     an externally started ffmpeg writes the FIFO/file named here. Same
     reference command, ending in "-f nut pipe:1 > FIFO".
@@ -71,9 +62,16 @@ documentation: |-
   The flowgraph sink must be the only clock: do NOT add a Throttle; ffmpeg
   is paced purely by pipe backpressure (no -re).
 
-  Buffering: the block requests >= 4 frames (4 x W x H x 3 bytes) of
-  buffer on the video port (deadlock prevention, see the block header
-  docs; GR default buffers are tens of kB while a raw frame is MBs) — do
-  not shrink.
+  Buffering: the video port defaults to 4 x 1920x1080x3 bytes (~24.9 MB,
+  four cap-sized frames) via a plain set_min_output_buffer request —
+  overridable in the Advanced tab (Min Output Buffer, wins when non-zero)
+  or from Python. GR allocates buffers before the headers are readable,
+  hence the fixed cap. Warning: shrinking below ~4 frames / the stream's
+  interleave burst re-opens the demuxer-deadlock window this default
+  exists to close (GR default buffers are tens of kB while a raw frame is
+  MBs).
+
+  Full explanation of the buffering/synchronization design: see the
+  gr-nut README, section "Buffering & synchronization" (docs/buffering.md).
 
 file_format: 1

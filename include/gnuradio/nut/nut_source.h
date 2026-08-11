@@ -42,15 +42,23 @@ namespace nut {
  *
  * Interface contract (a strict profile of NUT):
  *  - container: NUT, streamed, read from a FIFO or file (\p uri);
- *  - audio: pcm_f32le, interleaved, exactly \p audio_channels channels at
- *    exactly \p audio_rate Hz;
- *  - video (only if \p emit_video): rawvideo, pix_fmt rgb24, exactly
- *    \p video_width x \p video_height, constant frame rate;
+ *  - audio: pcm_f32le, interleaved, exactly \p audio_channels channels;
+ *  - video (only if \p emit_video): rawvideo, pix_fmt rgb24, constant
+ *    frame rate;
  *  - stream layout: exactly the declared set of streams.
- * Any mismatch is a hard error: start() throws std::runtime_error with an
- * actionable message (the fix is always on the ffmpeg command line).
- * Mid-stream violations (geometry change, new stream) are hard errors at
- * the point of detection.
+ * The audio sample rate and the video geometry/frame rate are NOT block
+ * parameters: they are read from the NUT stream headers and adopted at
+ * start(). The ffmpeg command is the single source of truth for them;
+ * making the downstream flowgraph match (resampler ratios, consumers'
+ * geometry) is the user's responsibility, not the block's. Adopted values
+ * are capped (audio <= 192 kHz, video frames <= 1920x1080) because output
+ * buffers must be sized before the headers are readable — exceeding a cap
+ * is a start-time failure. Structural mismatches (stream kinds vs the
+ * instance shape, wrong codec, wrong channel count) are hard errors with
+ * actionable messages (the fix is always on the ffmpeg command line), and
+ * a mid-stream CHANGE of the adopted layout/geometry is a hard error at
+ * the point of detection: adopted-at-start is still a contract for the
+ * run's duration.
  *
  * Reference ffmpeg command (audio-only, mono):
  * \code
@@ -103,11 +111,14 @@ namespace nut {
  * buffer while the consumer is starved of stream B, which the blocked
  * demuxer would deliver next. Because the NUT muxer bounds interleave skew
  * (-max_interleave_delta), sizing the output buffers above the maximum
- * interleave burst breaks the cycle: the constructor requests at least 1 s
- * of buffer on each audio port and at least 4 frames (4*W*H*3 bytes) on
- * the video port. Note that GR default buffers are tens of kB while a raw
- * frame is MBs — without this the video path would be broken out of the
- * box.
+ * interleave burst breaks the cycle. GR allocates stream buffers during
+ * tb.start() flowgraph setup, BEFORE block::start() reads the headers, so
+ * the buffers cannot be sized from the adopted format; the constructor
+ * therefore requests fixed generous caps: 192000 items per audio port
+ * (1 s at the 192 kHz cap) and 4 * 1920*1080*3 bytes (~24.9 MB, four
+ * 1080p frames) on the video port. Streams beyond those caps fail at
+ * start(). Note that GR default buffers are tens of kB while a raw frame
+ * is MBs — without this the video path would be broken out of the box.
  */
 class NUT_API nut_source : virtual public gr::block
 {
@@ -119,14 +130,10 @@ public:
      *
      * \param uri path to a FIFO or file containing the NUT stream
      * \param audio_channels number of float audio output ports
-     *        (deinterleaved); 0 for no audio
-     * \param audio_rate expected audio sample rate in Hz (validated
-     *        against the stream header, never adapted)
+     *        (deinterleaved); 0 for no audio. Structural: it fixes the
+     *        port signature, and the stream must carry exactly this many
+     *        channels.
      * \param emit_video whether the video output port exists
-     * \param video_width expected frame width (validated); required if
-     *        emit_video
-     * \param video_height expected frame height (validated); required if
-     *        emit_video
      * \param command full shell command (run via "/bin/sh -c") whose
      *        stdout emits the NUT stream per the contract (spawn mode).
      *        Mutually exclusive with \p uri: exactly one of the two must
@@ -134,11 +141,32 @@ public:
      */
     static sptr make(const std::string& uri,
                      int audio_channels,
-                     int audio_rate,
                      bool emit_video,
-                     int video_width,
-                     int video_height,
                      const std::string& command = "");
+
+    /*!
+     * \brief Audio sample rate adopted from the stream headers.
+     *
+     * 0 before the flowgraph has started (or if the instance has no
+     * audio); valid once tb.start() has returned.
+     */
+    virtual int audio_rate() const = 0;
+
+    /*!
+     * \brief Video frame width adopted from the stream headers.
+     *
+     * 0 before the flowgraph has started (or if the instance has no
+     * video); valid once tb.start() has returned.
+     */
+    virtual int video_width() const = 0;
+
+    /*!
+     * \brief Video frame height adopted from the stream headers.
+     *
+     * 0 before the flowgraph has started (or if the instance has no
+     * video); valid once tb.start() has returned.
+     */
+    virtual int video_height() const = 0;
 
     /*!
      * \brief The fatal error that terminated the flowgraph, or "" if none.

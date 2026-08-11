@@ -67,7 +67,7 @@ class fm_mono_tx(gr.top_block):
                 decimation=6,
                 taps=[],
                 fractional_bw=0)
-        self.nut_nut_source_audio_0 = nut.nut_source(uri, 1, 48000, False, 0, 0, command)
+        self.nut_nut_source_audio_0 = nut.nut_source(uri, 1, False, command)
         self.analog_wfm_tx_0 = analog.wfm_tx(
         	audio_rate=200000,
         	quad_rate=200000,

@@ -33,16 +33,20 @@ class nut_source_impl : public nut_source
 private:
     // ---- parameters (fixed at construction) ----
     const std::string d_uri;
-    const int d_nchan;      // audio channels == number of float ports
-    const int d_rate;       // expected audio sample rate
+    const int d_nchan; // audio channels == number of float ports (structural)
     const bool d_emit_video;
-    const int d_width;
-    const int d_height;
     const std::string d_command; // spawn mode: shell command emitting NUT on stdout
     const bool d_spawn;          // true when d_command is used (uri empty)
     const int d_video_port;      // output port index of the video port (== d_nchan)
     const int d_nports;          // total number of output ports
-    const size_t d_frame_bytes;  // W*H*3, one rgb24 frame
+
+    // ---- format adopted from the NUT stream headers at start() ----
+    // (0 until adopted; capped, see MAX_* in the .cc — output buffers are
+    // sized in the constructor, before the headers are readable)
+    int d_rate = 0;           // audio sample rate
+    int d_width = 0;          // video frame width
+    int d_height = 0;         // video frame height
+    size_t d_frame_bytes = 0; // W*H*3, one rgb24 frame
 
     // ---- input / libavformat state ----
     int d_fd = -1;
@@ -105,7 +109,9 @@ private:
     void open_input();           // open + parse headers + validate; throws
     void close_input() noexcept; // release everything, clear staging
     void reset_stream_state();   // pts / staging / priming bookkeeping
-    void validate_streams();     // §4.4; throws std::runtime_error
+    // Structural validation + adoption of rate/geometry from the headers
+    // (§4.4); throws std::runtime_error.
+    void validate_and_adopt_streams();
 
     int64_t pkt_pts_us(const AVPacket* pkt) const;
     int64_t video_frame_dur_us(const AVPacket* pkt) const;
@@ -132,16 +138,16 @@ private:
 public:
     nut_source_impl(const std::string& uri,
                     int audio_channels,
-                    int audio_rate,
                     bool emit_video,
-                    int video_width,
-                    int video_height,
                     const std::string& command);
     ~nut_source_impl() override;
 
     bool start() override;
     bool stop() override;
     std::string last_error() const override;
+    int audio_rate() const override { return d_rate; }
+    int video_width() const override { return d_width; }
+    int video_height() const override { return d_height; }
 
     void forecast(int noutput_items, gr_vector_int& ninput_items_required) override;
 

@@ -4,7 +4,7 @@ category: '[nut]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, ${audio_channels}, ${audio_rate}, True, ${video_width}, ${video_height}, ${command})
+  make: nut.nut_source(${uri}, ${audio_channels}, True, ${command})
 
 parameters:
 - id: command
@@ -20,18 +20,6 @@ parameters:
   label: Audio Channels
   dtype: int
   default: '1'
-- id: audio_rate
-  label: Audio Rate (Hz)
-  dtype: int
-  default: '48000'
-- id: video_width
-  label: Video Width
-  dtype: int
-  default: '640'
-- id: video_height
-  label: Video Height
-  dtype: int
-  default: '480'
 
 outputs:
 - label: audio
@@ -45,8 +33,6 @@ outputs:
 asserts:
 - ${command != '' or uri != ''}
 - ${audio_channels >= 1}
-- ${audio_rate > 0}
-- ${video_width > 0 and video_height > 0}
 
 documentation: |-
   Audio + video instance of nut.nut_source: ingests a raw-payload NUT
@@ -56,11 +42,16 @@ documentation: |-
   Source" — the three GRC entries only differ in the declared stream
   layout.
 
-  Contract (a strict profile of NUT; any mismatch is a hard error at
-  start):
-    * audio: pcm_f32le, interleaved, exactly Audio Channels @ Audio Rate
-    * video: rawvideo rgb24, exactly Width x Height, constant frame rate
+  Contract (a strict profile of NUT; structural mismatches are hard
+  errors at start):
+    * audio: pcm_f32le, interleaved, exactly Audio Channels channels
+    * video: rawvideo rgb24, constant frame rate
     * stream layout: exactly one audio and one video stream
+  The audio rate and the video geometry are read from the stream headers
+  and adopted at start (caps: 192 kHz audio, 1920x1080 video) — your
+  ffmpeg command is the single source of truth, and the downstream
+  flowgraph must match your command. Adopted values are available as
+  audio_rate()/video_width()/video_height() after start.
 
   Two plumbing modes (exactly one of Spawn Command / NUT File must be
   set):
@@ -76,10 +67,9 @@ documentation: |-
     stdout is contract-conforming NUT; validation at start is the
     guardrail. For seamless looping add -stream_loop -1 before -i.
     The default command is ready to run against /tmp/video.mp4 and
-    matches the default block parameters (mono @ 48000, 640x480 @ 25
-    fps); if you edit either side, keep the command's -ac / aresample /
-    scale/pad / fps values in sync with the block parameters (start-time
-    validation catches any mismatch).
+    conforms it to mono @ 48000 Hz + 640x480 @ 25 fps; the command's -ac
+    must match Audio Channels, and whatever rate/geometry/fps it produces
+    is what the block adopts.
   * NUT File (properties dialog; for users who know what they're doing):
     an externally started ffmpeg writes the FIFO/file named here. Same
     reference command, ending in "-f nut pipe:1 > FIFO".
@@ -95,10 +85,17 @@ documentation: |-
   same media time (within one audio sample / one video frame); pts
   discontinuities beyond a few ms are logged, never resynced.
 
-  Buffering: the block requests >= 1 s of buffer on each audio port and
-  >= 4 frames on the video port. This is deadlock prevention (the NUT
-  muxer bounds interleave skew via -max_interleave_delta, so buffers
-  larger than the interleave burst guarantee a synchronous downstream
-  combiner can always be fed) — do not shrink these.
+  Buffering: defaults are 192000 items per audio port (1 s at the
+  192 kHz cap) and 4 x 1920x1080x3 bytes (~24.9 MB) on the video port —
+  plain set_min_output_buffer requests, overridable in the Advanced tab
+  (Min Output Buffer, wins when non-zero) or from Python. GR allocates
+  buffers before the headers are readable, hence the fixed caps. This
+  sizing is deadlock prevention (the NUT muxer bounds interleave skew via
+  -max_interleave_delta, so buffers larger than the interleave burst
+  guarantee a synchronous downstream combiner can always be fed);
+  shrinking below the interleave burst re-opens that window.
+
+  Full explanation of the buffering/synchronization design: see the
+  gr-nut README, section "Buffering & synchronization" (docs/buffering.md).
 
 file_format: 1

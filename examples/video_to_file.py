@@ -26,22 +26,20 @@ from gnuradio import nut
 
 class video_to_file(gr.top_block):
 
-    def __init__(self, uri='/tmp/video.nut', width=320, height=240, outfile='frames.rgb'):
+    def __init__(self, uri='/tmp/video.nut', outfile='frames.rgb'):
         gr.top_block.__init__(self, "gr-nut M3 video-to-file dump", catch_exceptions=True)
 
         ##################################################
         # Parameters
         ##################################################
         self.uri = uri
-        self.width = width
-        self.height = height
         self.outfile = outfile
 
         ##################################################
         # Blocks
         ##################################################
 
-        self.nut_nut_source_video_0 = nut.nut_source(uri, 0, 0, True, width, height, '')
+        self.nut_nut_source_video_0 = nut.nut_source(uri, 0, True, '')
         self.blocks_file_sink_0 = blocks.file_sink(gr.sizeof_char*1, outfile, False)
         self.blocks_file_sink_0.set_unbuffered(False)
 
@@ -57,18 +55,6 @@ class video_to_file(gr.top_block):
 
     def set_uri(self, uri):
         self.uri = uri
-
-    def get_width(self):
-        return self.width
-
-    def set_width(self, width):
-        self.width = width
-
-    def get_height(self):
-        return self.height
-
-    def set_height(self, height):
-        self.height = height
 
     def get_outfile(self):
         return self.outfile
@@ -86,12 +72,6 @@ def argument_parser():
         "--uri", dest="uri", type=str, default='/tmp/video.nut',
         help="Set NUT FIFO/file [default=%(default)r]")
     parser.add_argument(
-        "--width", dest="width", type=intx, default=320,
-        help="Set Frame Width [default=%(default)r]")
-    parser.add_argument(
-        "--height", dest="height", type=intx, default=240,
-        help="Set Frame Height [default=%(default)r]")
-    parser.add_argument(
         "--outfile", dest="outfile", type=str, default='frames.rgb',
         help="Set Output raw rgb24 file [default=%(default)r]")
     return parser
@@ -100,7 +80,7 @@ def argument_parser():
 def main(top_block_cls=video_to_file, options=None):
     if options is None:
         options = argument_parser().parse_args()
-    tb = top_block_cls(uri=options.uri, width=options.width, height=options.height, outfile=options.outfile)
+    tb = top_block_cls(uri=options.uri, outfile=options.outfile)
 
     def sig_handler(sig=None, frame=None):
         tb.stop()

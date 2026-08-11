@@ -32,8 +32,9 @@ ffmpeg -hide_banner -loglevel warning -nostdin \
     -f nut pipe:1 > "$FIFO" &
 FFPID=$!
 
-python3 "$DIR/video_to_file.py" \
-    --uri "$FIFO" --width "$W" --height "$H" --outfile "$TMP/frames.rgb"
+# Geometry is adopted from the stream headers — only the uri and the
+# output path are passed.
+python3 "$DIR/video_to_file.py" --uri "$FIFO" --outfile "$TMP/frames.rgb"
 wait "$FFPID" || true
 
 # Reference: the same pattern rendered directly to raw rgb24.
