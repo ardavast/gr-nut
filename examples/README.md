@@ -53,6 +53,9 @@ python3 fm_mono_tx.py --freq 99.9e6 --command \
    -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1"
 ```
 
+(For seamless looping add `-stream_loop -1` before `-i` — looping lives
+inside ffmpeg, never in the block.)
+
 **External mode (the ops variant):** `fm_mono_tx.sh` creates the FIFO,
 starts ffmpeg into it, and passes `--uri` — the shape you'd put in a
 systemd unit:

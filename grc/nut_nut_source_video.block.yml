@@ -4,19 +4,18 @@ category: '[nut]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, 0, 0, True, ${video_width}, ${video_height}, ${repeat}, ${command})
+  make: nut.nut_source(${uri}, 0, 0, True, ${video_width}, ${video_height}, ${command})
 
 parameters:
-- id: uri
-  label: NUT FIFO/File (empty = spawn)
-  dtype: string
-  default: '/tmp/video.nut'
-  hide: ${'part' if command else 'none'}
 - id: command
-  label: Spawn Command (stdout->NUT)
+  label: Spawn Command
   dtype: string
   default: ''
-  hide: ${'part' if uri else 'none'}
+- id: uri
+  label: NUT File
+  dtype: string
+  default: ''
+  hide: part
 - id: video_width
   label: Video Width
   dtype: int
@@ -25,12 +24,6 @@ parameters:
   label: Video Height
   dtype: int
   default: '240'
-- id: repeat
-  label: Repeat
-  dtype: bool
-  default: 'False'
-  options: ['True', 'False']
-  option_labels: ['Yes', 'No']
 
 outputs:
 - label: video
@@ -38,6 +31,7 @@ outputs:
   dtype: byte
 
 asserts:
+- ${command != '' or uri != ''}
 - ${video_width > 0 and video_height > 0}
 
 documentation: |-
@@ -54,18 +48,21 @@ documentation: |-
   frame; steady-state consumers must not need it (geometry is
   contractual).
 
-  Two plumbing modes (exactly one of URI / Spawn Command must be set):
-  * External: an externally started ffmpeg writes the FIFO/file named by
-    URI. Reference command:
+  Two plumbing modes (exactly one of Spawn Command / NUT File must be
+  set):
+  * Spawn Command (the default mode, POSIX only): a full shell command;
+    the block runs it via /bin/sh -c and reads NUT from its stdout,
+    terminating and reaping it on stop. The command must write NUT to
+    stdout, e.g.:
       ffmpeg -i INPUT -an \
         -vf "fps=FPS,scale=W:H:force_original_aspect_ratio=decrease,pad=W:H:-1:-1,setsar=1" \
         -c:v rawvideo -pix_fmt rgb24 -fps_mode cfr \
-        -max_interleave_delta 500000 -f nut pipe:1 > FIFO
-  * Spawn (POSIX only): leave URI empty and put a full shell command in
-    Spawn Command; the block runs it via /bin/sh -c and reads NUT from its
-    stdout, terminating and reaping it on stop. Same reference command,
-    ending in "-f nut pipe:1" (no "> FIFO"). Validation at start is the
-    guardrail. With Repeat, EOF respawns the command (works for URLs too).
+        -max_interleave_delta 500000 -f nut pipe:1
+    Validation at start is the guardrail. For seamless looping add
+    -stream_loop -1 before -i.
+  * NUT File (properties dialog; for users who know what they're doing):
+    an externally started ffmpeg writes the FIFO/file named here. Same
+    reference command, ending in "-f nut pipe:1 > FIFO".
 
   The flowgraph sink must be the only clock: do NOT add a Throttle; ffmpeg
   is paced purely by pipe backpressure (no -re).

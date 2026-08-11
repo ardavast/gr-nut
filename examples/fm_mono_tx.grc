@@ -73,7 +73,8 @@ blocks:
     label: Spawn Command (spawn mode)
     short_id: ''
     type: str
-    value: ''
+    value: ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le
+      -max_interleave_delta 500000 -f nut pipe:1
   states:
     bus_sink: false
     bus_source: false
@@ -140,12 +141,11 @@ blocks:
     audio_channels: '1'
     audio_rate: '48000'
     command: command
-    comment: 'set exactly one of uri/command;
+    comment: 'set exactly one of command/uri;
 
       backpressure paces ffmpeg'
     maxoutbuf: '0'
     minoutbuf: '0'
-    repeat: 'False'
     uri: uri
   states:
     bus_sink: false

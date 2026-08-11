@@ -65,10 +65,9 @@ namespace nut {
  *    not match the declared parameters, start() throws the usual
  *    actionable error. The child runs in its own process group, spawned
  *    in start() before header validation; stop() SIGTERMs the group
- *    (grace, then SIGKILL) and reaps it — no zombies. With \p repeat,
- *    EOF respawns the command, which also works for non-seekable inputs
- *    (URLs, devices) — unlike external-mode repeat. Spawn mode is
- *    POSIX-only.
+ *    (grace, then SIGKILL) and reaps it — no zombies. For seamless
+ *    looping, put -stream_loop -1 before -i in the command. Spawn mode
+ *    is POSIX-only.
  * Setting both or neither of \p uri / \p command is a constructor error.
  *
  * Outputs: ports 0 .. audio_channels-1 are float audio (deinterleaved,
@@ -116,9 +115,6 @@ public:
      *        emit_video
      * \param video_height expected frame height (validated); required if
      *        emit_video
-     * \param repeat on EOF, reopen the input and restart (external mode:
-     *        seekable inputs only; spawn mode: respawns the command, any
-     *        input); otherwise the block signals done
      * \param command full shell command (run via "/bin/sh -c") whose
      *        stdout emits the NUT stream per the contract (spawn mode).
      *        Mutually exclusive with \p uri: exactly one of the two must
@@ -130,7 +126,6 @@ public:
                      bool emit_video,
                      int video_width,
                      int video_height,
-                     bool repeat,
                      const std::string& command = "");
 };
 

@@ -47,4 +47,6 @@ ffmpeg -hide_banner -loglevel warning -nostdin -i "$INPUT" \
     -f nut pipe:1 > "$FIFO" &
 FFPID=$!
 
-python3 "$DIR/fm_mono_tx.py" --uri "$FIFO" --freq "$FREQ" --vga-gain "$VGA"
+# --command "" overrides the .grc's spawn-mode default: this script IS the
+# external ffmpeg, so only --uri may be set.
+python3 "$DIR/fm_mono_tx.py" --uri "$FIFO" --command "" --freq "$FREQ" --vga-gain "$VGA"

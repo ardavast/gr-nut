@@ -112,8 +112,7 @@ Python:
 from gnuradio import nut
 src = nut.nut_source(uri="/tmp/stream.nut",
                      audio_channels=1, audio_rate=48000,
-                     emit_video=False, video_width=0, video_height=0,
-                     repeat=False)
+                     emit_video=False, video_width=0, video_height=0)
 ```
 
 GRC (category `[nut]`): three symmetric entries, all instantiating the
@@ -136,8 +135,7 @@ Exactly one of `uri` / `command` must be set:
   systemd unit) and writes the FIFO/file named by `uri`. See
   `examples/fm_mono_tx.sh`. `start()` blocks until the writer delivers the
   NUT stream headers (they are needed for validation), so start ffmpeg
-  first — or at least make sure it will start. `repeat=True` reopens the
-  input on EOF (seekable files only; a FIFO stops at EOF).
+  first — or at least make sure it will start.
 - **Spawn mode** (`command`, POSIX-only): the block runs the full
   user-authored shell command via `/bin/sh -c` and reads the NUT stream
   from an anonymous pipe on its stdout. The command must write NUT per the
@@ -157,15 +155,17 @@ Exactly one of `uri` / `command` must be set:
   guardrail (its errors point back at the spawn command). The child runs
   in its own process group with stdin from `/dev/null` and stderr
   inherited; it is spawned in `start()` (no "start ffmpeg first" footgun)
-  and SIGTERM'd/reaped on `stop()` — no zombies. `repeat=True` respawns
-  the command on EOF, which also works for non-seekable inputs (URLs,
-  devices).
+  and SIGTERM'd/reaped on `stop()` — no zombies.
 
 Notes:
 
 - On EOF the block signals done; a dead writer (broken pipe / child exit)
   is EOF plus a logged warning, with the spawned command's exit status
   logged distinctly.
+- Looping: the block itself never loops. In spawn mode put
+  `-stream_loop -1` before `-i` for seamless in-ffmpeg looping; a
+  recorded `.nut` file can likewise be looped by external means (e.g. an
+  external ffmpeg with `-stream_loop`) if ever needed.
 
 ## Design
 

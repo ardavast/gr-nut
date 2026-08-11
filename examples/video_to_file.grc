@@ -109,7 +109,6 @@ blocks:
     comment: video-only instance (audio_channels=0)
     maxoutbuf: '0'
     minoutbuf: '0'
-    repeat: 'False'
     uri: uri
     video_height: height
     video_width: width

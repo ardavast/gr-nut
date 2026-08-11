@@ -206,13 +206,13 @@ class qa_nut_source(gr_unittest.TestCase):
     def test_000_constructor_validation(self):
         # No outputs at all
         with self.assertRaises(ValueError):
-            nut.nut_source("x.nut", 0, RATE, False, 0, 0, False)
+            nut.nut_source("x.nut", 0, RATE, False, 0, 0)
         # Video without geometry
         with self.assertRaises(ValueError):
-            nut.nut_source("x.nut", 1, RATE, True, 0, 0, False)
+            nut.nut_source("x.nut", 1, RATE, True, 0, 0)
         # Negative channel count
         with self.assertRaises(ValueError):
-            nut.nut_source("x.nut", -1, RATE, False, 0, 0, False)
+            nut.nut_source("x.nut", -1, RATE, False, 0, 0)
 
     # ---- 1. audio exactness -------------------------------------------
 
@@ -220,7 +220,7 @@ class qa_nut_source(gr_unittest.TestCase):
     def test_001_audio_mono_exact(self):
         ref = sine(RATE)  # 1 s
         uri = mux_audio(self.tmp, ref, 1)
-        src = nut.nut_source(uri, 1, RATE, False, 0, 0, False)
+        src = nut.nut_source(uri, 1, RATE, False, 0, 0)
         snk = blocks.vector_sink_f()
         tb = gr.top_block()
         tb.connect(src, snk)
@@ -238,7 +238,7 @@ class qa_nut_source(gr_unittest.TestCase):
         inter[0::2] = left
         inter[1::2] = right
         uri = mux_audio(self.tmp, inter, 2)
-        src = nut.nut_source(uri, 2, RATE, False, 0, 0, False)
+        src = nut.nut_source(uri, 2, RATE, False, 0, 0)
         snk_l = blocks.vector_sink_f()
         snk_r = blocks.vector_sink_f()
         tb = gr.top_block()
@@ -267,7 +267,7 @@ class qa_nut_source(gr_unittest.TestCase):
                     "-c:v", "rawvideo", "-pix_fmt", "rgb24",
                     "-max_interleave_delta", "500000", "-f", "nut", uri])
         # fmt: on
-        src = nut.nut_source(uri, 0, 0, True, w, h, False)
+        src = nut.nut_source(uri, 0, 0, True, w, h)
         snk = blocks.vector_sink_b()
         tb = gr.top_block()
         tb.connect(src, snk)
@@ -302,7 +302,7 @@ class qa_nut_source(gr_unittest.TestCase):
         ref = sine(RATE)
         frames = make_frames(nframes, w, h)
         uri = mux_av(self.tmp, ref, frames, w, h, fps=fps, audio_offset=0.2)
-        src = nut.nut_source(uri, 1, RATE, True, w, h, False)
+        src = nut.nut_source(uri, 1, RATE, True, w, h)
         snk_a = blocks.vector_sink_f()
         snk_v = blocks.vector_sink_b()
         tb = gr.top_block()
@@ -335,7 +335,7 @@ class qa_nut_source(gr_unittest.TestCase):
             self.tmp, ref, frames, w, h, fps=fps, video_offset=0.2,
             fps_mode="passthrough",
         )
-        src = nut.nut_source(uri, 1, RATE, True, w, h, False)
+        src = nut.nut_source(uri, 1, RATE, True, w, h)
         snk_a = blocks.vector_sink_f()
         snk_v = blocks.vector_sink_b()
         tb = gr.top_block()
@@ -358,21 +358,21 @@ class qa_nut_source(gr_unittest.TestCase):
     def test_006_validation_channel_count(self):
         inter = np.zeros(2 * 1024, dtype=np.float32)
         uri = mux_audio(self.tmp, inter, 2)  # stereo fixture
-        src = nut.nut_source(uri, 1, RATE, False, 0, 0, False)  # declared mono
+        src = nut.nut_source(uri, 1, RATE, False, 0, 0)  # declared mono
         with self.assertRaisesRegex(RuntimeError, r"channel.*-ac"):
             src.start()
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_007_validation_sample_rate(self):
         uri = mux_audio(self.tmp, sine(4410, rate=44100), 1, rate=44100)
-        src = nut.nut_source(uri, 1, RATE, False, 0, 0, False)
+        src = nut.nut_source(uri, 1, RATE, False, 0, 0)
         with self.assertRaisesRegex(RuntimeError, r"48000 Hz.*44100 Hz"):
             src.start()
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_008_validation_codec(self):
         uri = mux_audio(self.tmp, sine(1024), 1, codec="pcm_s16le")
-        src = nut.nut_source(uri, 1, RATE, False, 0, 0, False)
+        src = nut.nut_source(uri, 1, RATE, False, 0, 0)
         with self.assertRaisesRegex(RuntimeError, r"pcm_f32le.*pcm_s16le"):
             src.start()
 
@@ -389,14 +389,14 @@ class qa_nut_source(gr_unittest.TestCase):
                     "-i", vraw, "-c:v", "rawvideo", "-pix_fmt", "rgb24",
                     "-max_interleave_delta", "500000", "-f", "nut", uri])
         # fmt: on
-        src = nut.nut_source(uri, 0, 0, True, 32, 24, False)  # declared 32x24
+        src = nut.nut_source(uri, 0, 0, True, 32, 24)  # declared 32x24
         with self.assertRaisesRegex(RuntimeError, r"32x24.*64x48"):
             src.start()
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_010_validation_stream_layout(self):
         uri = mux_audio(self.tmp, sine(1024), 1)  # audio-only fixture
-        src = nut.nut_source(uri, 1, RATE, True, 32, 24, False)  # video declared
+        src = nut.nut_source(uri, 1, RATE, True, 32, 24)  # video declared
         with self.assertRaisesRegex(RuntimeError, r"stream layout"):
             src.start()
 
@@ -414,7 +414,7 @@ class qa_nut_source(gr_unittest.TestCase):
         ref = sine(dur * RATE)
         frames = make_frames(dur * fps, w, h)
         uri = mux_av(self.tmp, ref, frames, w, h, fps=fps)
-        src = nut.nut_source(uri, 1, RATE, True, w, h, False)
+        src = nut.nut_source(uri, 1, RATE, True, w, h)
         a2b = blocks.float_to_char(1, 127.0)
         comb = blocks.interleave(gr.sizeof_char, 1)
         snk = blocks.null_sink(gr.sizeof_char)
@@ -426,37 +426,19 @@ class qa_nut_source(gr_unittest.TestCase):
             run_with_timeout(tb, 60), "synchronous A/V recombine deadlocked"
         )
 
-    # ---- 6. EOF & repeat ----------------------------------------------
+    # ---- 6. EOF -------------------------------------------------------
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_012_eof_work_done(self):
         n = RATE // 4
         ref = sine(n)
         uri = mux_audio(self.tmp, ref, 1)
-        src = nut.nut_source(uri, 1, RATE, False, 0, 0, False)
+        src = nut.nut_source(uri, 1, RATE, False, 0, 0)
         snk = blocks.vector_sink_f()
         tb = gr.top_block()
         tb.connect(src, snk)
         self.assertTrue(run_with_timeout(tb, 30), "flowgraph did not finish at EOF")
         self.assertTrue(np.array_equal(np.array(snk.data(), dtype=np.float32), ref))
-
-    @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
-    def test_013_repeat(self):
-        n = RATE // 10
-        loops = 3
-        ref = sine(n)
-        uri = mux_audio(self.tmp, ref, 1)
-        src = nut.nut_source(uri, 1, RATE, False, 0, 0, True)  # repeat
-        head = blocks.head(gr.sizeof_float, loops * n)
-        snk = blocks.vector_sink_f()
-        tb = gr.top_block()
-        tb.connect(src, head, snk)
-        self.assertTrue(run_with_timeout(tb, 30), "repeat run did not finish")
-        out = np.array(snk.data(), dtype=np.float32)
-        self.assertTrue(
-            np.array_equal(out, np.tile(ref, loops)),
-            "repeat must loop the file back-to-back, sample-exact",
-        )
 
     # ---- 7. shutdown with a stalled writer ----------------------------
 
@@ -477,7 +459,7 @@ class qa_nut_source(gr_unittest.TestCase):
         with open(nutfile, "rb") as f:
             os.write(wfd, f.read())  # headers + payload, then stall
         try:
-            src = nut.nut_source(fifo, 1, RATE, False, 0, 0, False)
+            src = nut.nut_source(fifo, 1, RATE, False, 0, 0)
             snk = blocks.null_sink(gr.sizeof_float)
             tb = gr.top_block()
             tb.connect(src, snk)
@@ -506,10 +488,10 @@ class qa_nut_source(gr_unittest.TestCase):
 
     def test_015_ctor_uri_command_exclusive(self):
         with self.assertRaises(ValueError):  # neither given
-            nut.nut_source("", 1, RATE, False, 0, 0, False, command="")
+            nut.nut_source("", 1, RATE, False, 0, 0, command="")
         with self.assertRaises(ValueError):  # both given
             nut.nut_source(
-                "x.nut", 1, RATE, False, 0, 0, False, command="ffmpeg ..."
+                "x.nut", 1, RATE, False, 0, 0, command="ffmpeg ..."
             )
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
@@ -520,7 +502,7 @@ class qa_nut_source(gr_unittest.TestCase):
         wav = make_wav(self.tmp, "spawn_fix.wav", seconds=2)
         ref = decode_reference(self.tmp, wav)
         src = nut.nut_source(
-            "", 1, RATE, False, 0, 0, False, command=spawn_cmd_audio(wav)
+            "", 1, RATE, False, 0, 0, command=spawn_cmd_audio(wav)
         )
         snk = blocks.vector_sink_f()
         tb = gr.top_block()
@@ -543,7 +525,7 @@ class qa_nut_source(gr_unittest.TestCase):
         token = "qa_nut_spawn_pipeline_fixture.wav"
         wav = make_wav(self.tmp, token, seconds=60)
         cmd = "cat %s | %s" % (shlex.quote(wav), spawn_cmd_audio("pipe:0"))
-        src = nut.nut_source("", 1, RATE, False, 0, 0, False, command=cmd)
+        src = nut.nut_source("", 1, RATE, False, 0, 0, command=cmd)
         thr = blocks.throttle(gr.sizeof_float, RATE)
         snk = blocks.null_sink(gr.sizeof_float)
         tb = gr.top_block()
@@ -573,31 +555,11 @@ class qa_nut_source(gr_unittest.TestCase):
         self.assertEqual(zombie_children(), [], "zombie child left behind")
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
-    def test_018_spawn_repeat_respawn(self):
-        loops = 3
-        wav = make_wav(self.tmp, "spawn_rep.wav", seconds=0.1)
-        ref = decode_reference(self.tmp, wav)
-        src = nut.nut_source(
-            "", 1, RATE, False, 0, 0, True, command=spawn_cmd_audio(wav)
-        )
-        head = blocks.head(gr.sizeof_float, loops * len(ref))
-        snk = blocks.vector_sink_f()
-        tb = gr.top_block()
-        tb.connect(src, head, snk)
-        self.assertTrue(run_with_timeout(tb, 60), "repeat/respawn did not finish")
-        out = np.array(snk.data(), dtype=np.float32)
-        self.assertTrue(
-            np.array_equal(out, np.tile(ref, loops)),
-            "respawn must replay the media back-to-back, sample-exact",
-        )
-        self.assertEqual(zombie_children(), [], "spawned command not reaped")
-
-    @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_019_spawn_failing_command(self):
         # ffmpeg with a nonexistent input: exits nonzero, writes no NUT.
         # start() must surface it as a RuntimeError pointing at the command.
         src = nut.nut_source(
-            "", 1, RATE, False, 0, 0, False,
+            "", 1, RATE, False, 0, 0,
             command=spawn_cmd_audio("/nonexistent/no_such_media.wav"),
         )
         with self.assertRaisesRegex(RuntimeError, r"spawn command"):
@@ -614,7 +576,7 @@ class qa_nut_source(gr_unittest.TestCase):
         # the spawn command.
         wav = make_wav(self.tmp, "spawn_guard.wav", seconds=0.2)
         src = nut.nut_source(  # command emits stereo, block declares mono
-            "", 1, RATE, False, 0, 0, False,
+            "", 1, RATE, False, 0, 0,
             command=spawn_cmd_audio(wav, channels=2),
         )
         with self.assertRaisesRegex(

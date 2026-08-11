@@ -95,7 +95,6 @@ nut_source::sptr nut_source::make(const std::string& uri,
                                   bool emit_video,
                                   int video_width,
                                   int video_height,
-                                  bool repeat,
                                   const std::string& command)
 {
     return gnuradio::make_block_sptr<nut_source_impl>(uri,
@@ -104,7 +103,6 @@ nut_source::sptr nut_source::make(const std::string& uri,
                                                       emit_video,
                                                       video_width,
                                                       video_height,
-                                                      repeat,
                                                       command);
 }
 
@@ -114,7 +112,6 @@ nut_source_impl::nut_source_impl(const std::string& uri,
                                  bool emit_video,
                                  int video_width,
                                  int video_height,
-                                 bool repeat,
                                  const std::string& command)
     : gr::block("nut_source",
                 gr::io_signature::make(0, 0, 0),
@@ -129,7 +126,6 @@ nut_source_impl::nut_source_impl(const std::string& uri,
       d_emit_video(emit_video),
       d_width(video_width),
       d_height(video_height),
-      d_repeat(repeat),
       d_command(command),
       d_spawn(uri.empty()),
       d_video_port(audio_channels),
@@ -812,27 +808,6 @@ void nut_source_impl::flush_video(int noutput_items,
     }
 }
 
-bool nut_source_impl::try_reopen()
-{
-    // Spawn mode can always repeat: the child is simply respawned, which
-    // re-reads the media from its start — this works even for non-seekable
-    // inputs (URLs, devices). External mode needs a reopenable file.
-    if (!d_spawn && d_is_fifo) {
-        d_logger->warn(
-            "repeat requested but '{}' is a FIFO (not reopenable); stopping at EOF",
-            d_uri);
-        return false;
-    }
-    try {
-        open_input(); // closes the old input (reaps the child), resets pts state
-    } catch (const std::exception& e) {
-        d_logger->error("repeat: reopen failed: {}", e.what());
-        return false;
-    }
-    d_eof = false;
-    return true;
-}
-
 void nut_source_impl::forecast(int noutput_items, gr_vector_int& ninput_items_required)
 {
     // Source block: no inputs.
@@ -874,8 +849,6 @@ int nut_source_impl::general_work(int noutput_items,
                 // Reap promptly; a nonzero exit status is logged distinctly
                 // (EOF caused by a failing child, not by end of media).
                 terminate_child(/*quiet=*/false);
-            if (d_repeat && try_reopen())
-                continue;
             done = true;
             break;
         }

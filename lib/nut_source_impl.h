@@ -38,7 +38,6 @@ private:
     const bool d_emit_video;
     const int d_width;
     const int d_height;
-    const bool d_repeat;
     const std::string d_command; // spawn mode: shell command emitting NUT on stdout
     const bool d_spawn;          // true when d_command is used (uri empty)
     const int d_video_port;      // output port index of the video port (== d_nchan)
@@ -120,7 +119,6 @@ private:
     void flush_video(int noutput_items,
                      gr_vector_void_star& output_items,
                      std::vector<int>& produced);
-    bool try_reopen();
 
 public:
     nut_source_impl(const std::string& uri,
@@ -129,7 +127,6 @@ public:
                     bool emit_video,
                     int video_width,
                     int video_height,
-                    bool repeat,
                     const std::string& command);
     ~nut_source_impl() override;
 

@@ -4,19 +4,18 @@ category: '[nut]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, ${audio_channels}, ${audio_rate}, False, 0, 0, ${repeat}, ${command})
+  make: nut.nut_source(${uri}, ${audio_channels}, ${audio_rate}, False, 0, 0, ${command})
 
 parameters:
-- id: uri
-  label: NUT FIFO/File (empty = spawn)
-  dtype: string
-  default: '/tmp/stream.nut'
-  hide: ${'part' if command else 'none'}
 - id: command
-  label: Spawn Command (stdout->NUT)
+  label: Spawn Command
   dtype: string
   default: ''
-  hide: ${'part' if uri else 'none'}
+- id: uri
+  label: NUT File
+  dtype: string
+  default: ''
+  hide: part
 - id: audio_channels
   label: Audio Channels
   dtype: int
@@ -25,12 +24,6 @@ parameters:
   label: Audio Rate (Hz)
   dtype: int
   default: '48000'
-- id: repeat
-  label: Repeat
-  dtype: bool
-  default: 'False'
-  options: ['True', 'False']
-  option_labels: ['Yes', 'No']
 
 outputs:
 - label: audio
@@ -39,6 +32,7 @@ outputs:
   multiplicity: ${audio_channels}
 
 asserts:
+- ${command != '' or uri != ''}
 - ${audio_channels >= 1}
 - ${audio_rate > 0}
 
@@ -53,21 +47,20 @@ documentation: |-
   start): pcm_f32le, interleaved, exactly Audio Channels @ Audio Rate, the
   only stream in the container.
 
-  Two plumbing modes (exactly one of URI / Spawn Command must be set):
-  * External: an externally started ffmpeg writes the FIFO/file named by
-    URI. Reference command (mono; stereo: -ac 2):
-      ffmpeg -i INPUT -vn -af "aresample=48000:async=1" -ac 1 \
-        -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1 > FIFO
-  * Spawn (POSIX only): leave URI empty and put a full shell command in
-    Spawn Command; the block runs it via /bin/sh -c and reads NUT from its
-    stdout, terminating and reaping it on stop. The command must write NUT
-    to stdout — same reference command, ending in "-f nut pipe:1" (no
-    "> FIFO"), e.g.:
+  Two plumbing modes (exactly one of Spawn Command / NUT File must be
+  set):
+  * Spawn Command (the default mode, POSIX only): a full shell command;
+    the block runs it via /bin/sh -c and reads NUT from its stdout,
+    terminating and reaping it on stop. The command must write NUT to
+    stdout, e.g. (mono; stereo: -ac 2):
       ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 \
         -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1
     Anything goes (pipelines, curl | ffmpeg, extra filters) as long as
     stdout is contract-conforming NUT; validation at start is the
-    guardrail. With Repeat, EOF respawns the command (works for URLs too).
+    guardrail. For seamless looping add -stream_loop -1 before -i.
+  * NUT File (properties dialog; for users who know what they're doing):
+    an externally started ffmpeg writes the FIFO/file named here. Same
+    reference command, ending in "-f nut pipe:1 > FIFO".
 
   The flowgraph sink (SDR/audio device) must be the only clock: do NOT add
   a Throttle; ffmpeg is paced purely by pipe backpressure (no -re).

@@ -28,7 +28,7 @@ from gnuradio import soapy
 
 class fm_mono_tx(gr.top_block):
 
-    def __init__(self, uri='', command='', freq=99.9e6, vga_gain=40, amp=0):
+    def __init__(self, uri='', command='ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1', freq=99.9e6, vga_gain=40, amp=0):
         gr.top_block.__init__(self, "gr-nut M1 mono FM transmitter", catch_exceptions=True)
 
         ##################################################
@@ -67,7 +67,7 @@ class fm_mono_tx(gr.top_block):
                 decimation=6,
                 taps=[],
                 fractional_bw=0)
-        self.nut_nut_source_audio_0 = nut.nut_source(uri, 1, 48000, False, 0, 0, False, command)
+        self.nut_nut_source_audio_0 = nut.nut_source(uri, 1, 48000, False, 0, 0, command)
         self.analog_wfm_tx_0 = analog.wfm_tx(
         	audio_rate=200000,
         	quad_rate=200000,
@@ -128,7 +128,7 @@ def argument_parser():
         "--uri", dest="uri", type=str, default='',
         help="Set NUT FIFO/file (external mode) [default=%(default)r]")
     parser.add_argument(
-        "--command", dest="command", type=str, default='',
+        "--command", dest="command", type=str, default='ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1',
         help="Set Spawn Command (spawn mode) [default=%(default)r]")
     parser.add_argument(
         "--freq", dest="freq", type=eng_float, default=eng_notation.num_to_str(float(99.9e6)),
