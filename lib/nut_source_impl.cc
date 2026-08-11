@@ -77,18 +77,19 @@ const char* pix_fmt_name(int fmt)
 }
 
 // Validates the constructor parameters and builds the output signature
-// (N float audio ports, then one byte video port if emit_video).
-std::vector<int> out_sizes(int audio_channels, bool emit_video)
+// (N float audio ports, then one byte port per video stream).
+std::vector<int> out_sizes(int audio_channels, int video_streams)
 {
     if (audio_channels < 0)
         throw std::invalid_argument("nut_source: audio_channels must be >= 0");
-    if (audio_channels == 0 && !emit_video)
+    if (video_streams < 0)
+        throw std::invalid_argument("nut_source: video_streams must be >= 0");
+    if (audio_channels == 0 && video_streams == 0)
         throw std::invalid_argument(
             "nut_source: block would have no outputs — set audio_channels > 0 and/or "
-            "emit_video");
+            "video_streams > 0");
     std::vector<int> sizes(audio_channels, sizeof(float));
-    if (emit_video)
-        sizes.push_back(sizeof(unsigned char));
+    sizes.insert(sizes.end(), video_streams, sizeof(unsigned char));
     return sizes;
 }
 
@@ -96,29 +97,29 @@ std::vector<int> out_sizes(int audio_channels, bool emit_video)
 
 nut_source::sptr nut_source::make(const std::string& uri,
                                   int audio_channels,
-                                  bool emit_video,
+                                  int video_streams,
                                   const std::string& command)
 {
     return gnuradio::make_block_sptr<nut_source_impl>(
-        uri, audio_channels, emit_video, command);
+        uri, audio_channels, video_streams, command);
 }
 
 nut_source_impl::nut_source_impl(const std::string& uri,
                                  int audio_channels,
-                                 bool emit_video,
+                                 int video_streams,
                                  const std::string& command)
     : gr::block("nut_source",
                 gr::io_signature::make(0, 0, 0),
-                gr::io_signature::makev(audio_channels + (emit_video ? 1 : 0),
-                                        audio_channels + (emit_video ? 1 : 0),
-                                        out_sizes(audio_channels, emit_video))),
+                gr::io_signature::makev(audio_channels + video_streams,
+                                        audio_channels + video_streams,
+                                        out_sizes(audio_channels, video_streams))),
       d_uri(uri),
       d_nchan(audio_channels),
-      d_emit_video(emit_video),
+      d_nvideo(video_streams),
       d_command(command),
       d_spawn(uri.empty()),
-      d_video_port(audio_channels),
-      d_nports(audio_channels + (emit_video ? 1 : 0))
+      d_nports(audio_channels + video_streams),
+      d_video(video_streams)
 {
     if (uri.empty() && command.empty())
         throw std::invalid_argument(
@@ -134,9 +135,13 @@ nut_source_impl::nut_source_impl(const std::string& uri,
 
     d_rd_pkt = av_packet_alloc();
     d_a_pkt = av_packet_alloc();
-    d_v_pkt = av_packet_alloc();
-    if (!d_rd_pkt || !d_a_pkt || !d_v_pkt)
+    if (!d_rd_pkt || !d_a_pkt)
         throw std::runtime_error("nut_source: av_packet_alloc failed");
+    for (video_state& vs : d_video) {
+        vs.pkt = av_packet_alloc();
+        if (!vs.pkt)
+            throw std::runtime_error("nut_source: av_packet_alloc failed");
+    }
 
     // Fixed generous buffer caps (see MAX_* above): buffers must be sized
     // here — GR allocates them during tb.start() flowgraph setup, before
@@ -144,8 +149,8 @@ nut_source_impl::nut_source_impl(const std::string& uri,
     // the §4.7 demuxer deadlock.
     for (int i = 0; i < d_nchan; i++)
         set_min_output_buffer(i, MAX_AUDIO_RATE); // 1 s of audio at the cap
-    if (d_emit_video)
-        set_min_output_buffer(d_video_port, VIDEO_BUFFER_FRAMES * MAX_FRAME_BYTES);
+    for (int v = 0; v < d_nvideo; v++)
+        set_min_output_buffer(d_nchan + v, VIDEO_BUFFER_FRAMES * MAX_FRAME_BYTES);
 }
 
 nut_source_impl::~nut_source_impl()
@@ -153,7 +158,8 @@ nut_source_impl::~nut_source_impl()
     close_input();
     av_packet_free(&d_rd_pkt);
     av_packet_free(&d_a_pkt);
-    av_packet_free(&d_v_pkt);
+    for (video_state& vs : d_video)
+        av_packet_free(&vs.pkt);
 }
 
 bool nut_source_impl::interrupted() const
@@ -221,19 +227,26 @@ int64_t nut_source_impl::seek_cb(void* opaque, int64_t offset, int whence)
 void nut_source_impl::reset_stream_state()
 {
     av_packet_unref(d_a_pkt);
-    av_packet_unref(d_v_pkt);
-    d_a_staged = d_v_staged = false;
-    d_a_off = d_v_off = 0;
-    d_v_staged_pts = 0;
+    d_a_staged = false;
+    d_a_off = 0;
+    for (video_state& vs : d_video) {
+        av_packet_unref(vs.pkt);
+        vs.staged = false;
+        vs.off = 0;
+        vs.staged_pts = 0;
+        vs.first_us = INT64_MIN;
+        vs.skip_before_us = INT64_MIN;
+        vs.expect_valid = false;
+        vs.expect_us = 0;
+    }
     for (AVPacket* p : d_prime_q)
         av_packet_free(&p);
     d_prime_q.clear();
     d_priming = false;
-    d_a_first_us = d_v_first_us = INT64_MIN;
+    d_a_first_us = INT64_MIN;
     d_a_skip_frames = 0;
-    d_v_skip_before_us = INT64_MIN;
-    d_a_expect_valid = d_v_expect_valid = false;
-    d_a_expect_us = d_v_expect_us = 0;
+    d_a_expect_valid = false;
+    d_a_expect_us = 0;
 }
 
 // Spawn mode (POSIX-only): run the user-authored command via /bin/sh -c and
@@ -456,21 +469,28 @@ void nut_source_impl::open_input()
         throw;
     }
 
-    d_priming = (d_nchan > 0 && d_emit_video);
+    // Priming (initial pts trim) is needed whenever more than one stream
+    // must start at the same media time.
+    d_priming = (d_nchan > 0 ? 1 : 0) + d_nvideo > 1;
 }
 
 void nut_source_impl::validate_and_adopt_streams()
 {
     int n_audio = 0, n_video = 0, n_other = 0;
-    d_audio_idx = d_video_idx = -1;
+    d_audio_idx = -1;
+    for (video_state& vs : d_video)
+        vs.stream_idx = -1;
     for (unsigned i = 0; i < d_fmt->nb_streams; i++) {
         const AVCodecParameters* cp = d_fmt->streams[i]->codecpar;
         if (cp->codec_type == AVMEDIA_TYPE_AUDIO) {
             if (n_audio++ == 0)
                 d_audio_idx = static_cast<int>(i);
         } else if (cp->codec_type == AVMEDIA_TYPE_VIDEO) {
-            if (n_video++ == 0)
-                d_video_idx = static_cast<int>(i);
+            // The v-th video stream in NUT stream order (== the ffmpeg
+            // -map order of the writing command) feeds port video_v.
+            if (n_video < d_nvideo)
+                d_video[n_video].stream_idx = static_cast<int>(i);
+            n_video++;
         } else {
             n_other++;
         }
@@ -478,11 +498,10 @@ void nut_source_impl::validate_and_adopt_streams()
 
     const char* hint = d_spawn ? " (check your spawn command)" : "";
     const int want_audio = d_nchan > 0 ? 1 : 0;
-    const int want_video = d_emit_video ? 1 : 0;
-    if (n_audio != want_audio || n_video != want_video || n_other != 0) {
+    if (n_audio != want_audio || n_video != d_nvideo || n_other != 0) {
         std::ostringstream os;
         os << "nut_source: stream layout mismatch: expected exactly " << want_audio
-           << " audio and " << want_video << " video stream(s), found " << n_audio
+           << " audio and " << d_nvideo << " video stream(s), found " << n_audio
            << " audio, " << n_video << " video, " << n_other
            << " other — fix the ffmpeg -map/-vn/-an options" << hint;
         throw std::runtime_error(os.str());
@@ -522,24 +541,28 @@ void nut_source_impl::validate_and_adopt_streams()
         adopted << "audio " << d_rate << " Hz x" << d_nchan << "ch";
     }
 
-    if (d_emit_video) {
-        const AVCodecParameters* cp = d_fmt->streams[d_video_idx]->codecpar;
+    for (int v = 0; v < d_nvideo; v++) {
+        video_state& vs = d_video[v];
+        const AVCodecParameters* cp = d_fmt->streams[vs.stream_idx]->codecpar;
         if (cp->codec_id != AV_CODEC_ID_RAWVIDEO || cp->format != AV_PIX_FMT_RGB24) {
             std::ostringstream os;
-            os << "nut_source: expected rawvideo/rgb24 video, stream has "
-               << codec_name(cp->codec_id) << "/" << pix_fmt_name(cp->format)
-               << " — fix the ffmpeg -c:v/-pix_fmt options" << hint;
+            os << "nut_source: expected rawvideo/rgb24 for video stream " << v
+               << ", stream has " << codec_name(cp->codec_id) << "/"
+               << pix_fmt_name(cp->format) << " — fix the ffmpeg -c:v/-pix_fmt "
+               << "options" << hint;
             throw std::runtime_error(os.str());
         }
         if (cp->width <= 0 || cp->height <= 0) {
-            throw std::runtime_error(
-                "nut_source: video stream declares no geometry" + std::string(hint));
+            std::ostringstream os;
+            os << "nut_source: video stream " << v << " declares no geometry"
+               << hint;
+            throw std::runtime_error(os.str());
         }
         const size_t frame_bytes = size_t(cp->width) * cp->height * 3;
         if (frame_bytes > MAX_FRAME_BYTES) {
             std::ostringstream os;
-            os << "nut_source: video frame " << cp->width << "x" << cp->height
-               << " rgb24 = " << frame_bytes
+            os << "nut_source: video stream " << v << " frame " << cp->width << "x"
+               << cp->height << " rgb24 = " << frame_bytes
                << " bytes exceeds the built-in cap of one 1920x1080 frame ("
                << MAX_FRAME_BYTES
                << " bytes); output buffers hold 4 cap-sized frames and are "
@@ -548,18 +571,34 @@ void nut_source_impl::validate_and_adopt_streams()
                << hint;
             throw std::runtime_error(os.str());
         }
-        d_width = cp->width;
-        d_height = cp->height;
-        d_frame_bytes = frame_bytes;
-        if (d_nchan > 0)
+        vs.width = cp->width;
+        vs.height = cp->height;
+        vs.frame_bytes = frame_bytes;
+        if (d_nchan > 0 || v > 0)
             adopted << ", ";
-        adopted << "video " << d_width << "x" << d_height << " rgb24";
-        const AVRational fr = d_fmt->streams[d_video_idx]->avg_frame_rate;
+        adopted << "video" << v << " " << vs.width << "x" << vs.height << " rgb24";
+        const AVRational fr = d_fmt->streams[vs.stream_idx]->avg_frame_rate;
         if (fr.num > 0 && fr.den > 0)
             adopted << " @ " << av_q2d(fr) << " fps";
     }
 
     d_logger->info("adopted: {}", adopted.str());
+}
+
+int nut_source_impl::video_slot(int stream_idx) const
+{
+    for (int v = 0; v < d_nvideo; v++)
+        if (d_video[v].stream_idx == stream_idx)
+            return v;
+    return -1;
+}
+
+bool nut_source_impl::any_video_staged() const
+{
+    for (const video_state& vs : d_video)
+        if (vs.staged)
+            return true;
+    return false;
 }
 
 void nut_source_impl::fail(const std::string& msg)
@@ -588,8 +627,12 @@ bool nut_source_impl::start()
         d_error.clear();
     }
     // Re-adopt the format from the (possibly new) stream on every start.
-    d_rate = d_width = d_height = 0;
-    d_frame_bytes = 0;
+    d_rate = 0;
+    for (video_state& vs : d_video) {
+        vs.width = vs.height = 0;
+        vs.frame_bytes = 0;
+        vs.stream_idx = -1;
+    }
     // start() runs inside the block's scheduler thread; an exception here
     // would be swallowed by GR's thread wrapper, killing only this thread
     // while the rest of the flowgraph hangs. Convert failures to a logged
@@ -652,8 +695,16 @@ int nut_source_impl::prime()
     for (AVPacket* p : d_prime_q)
         prime_bytes += p->size;
 
-    while ((d_nchan > 0 && d_a_first_us == INT64_MIN) ||
-           (d_emit_video && d_v_first_us == INT64_MIN)) {
+    const auto all_first_known = [this] {
+        if (d_nchan > 0 && d_a_first_us == INT64_MIN)
+            return false;
+        for (const video_state& vs : d_video)
+            if (vs.first_us == INT64_MIN)
+                return false;
+        return true;
+    };
+
+    while (!all_first_known()) {
         int ret = av_read_frame(d_fmt, d_rd_pkt);
         if (ret == AVERROR_EXIT)
             return ret;
@@ -669,7 +720,8 @@ int nut_source_impl::prime()
             break;
         }
         const int si = d_rd_pkt->stream_index;
-        if (si != d_audio_idx && si != d_video_idx) {
+        const int slot = video_slot(si);
+        if (si != d_audio_idx && slot < 0) {
             av_packet_unref(d_rd_pkt);
             throw std::runtime_error(
                 "nut_source: a new stream appeared mid-stream — the contract forbids "
@@ -678,8 +730,8 @@ int nut_source_impl::prime()
         const int64_t p_us = pkt_pts_us(d_rd_pkt);
         if (si == d_audio_idx && d_a_first_us == INT64_MIN)
             d_a_first_us = (p_us == INT64_MIN) ? 0 : p_us;
-        if (si == d_video_idx && d_v_first_us == INT64_MIN)
-            d_v_first_us = (p_us == INT64_MIN) ? 0 : p_us;
+        if (slot >= 0 && d_video[slot].first_us == INT64_MIN)
+            d_video[slot].first_us = (p_us == INT64_MIN) ? 0 : p_us;
 
         AVPacket* c = av_packet_alloc();
         if (!c)
@@ -700,16 +752,33 @@ int nut_source_impl::prime()
 void nut_source_impl::finish_priming()
 {
     d_priming = false;
-    if (d_a_first_us == INT64_MIN || d_v_first_us == INT64_MIN)
-        return; // EOF before both streams appeared; nothing to trim
-    const int64_t start = std::max(d_a_first_us, d_v_first_us);
-    if (start > d_a_first_us)
+    // Trim every stream whose first pts is known to the latest first-pts
+    // so all ports start at the same media time. Streams that never
+    // appeared before EOF are simply left untrimmed.
+    int64_t start = INT64_MIN;
+    std::ostringstream firsts;
+    if (d_nchan > 0 && d_a_first_us != INT64_MIN) {
+        start = std::max(start, d_a_first_us);
+        firsts << "audio " << d_a_first_us << " us";
+    }
+    for (int v = 0; v < d_nvideo; v++) {
+        if (d_video[v].first_us == INT64_MIN)
+            continue;
+        start = std::max(start, d_video[v].first_us);
+        if (firsts.tellp() > 0)
+            firsts << ", ";
+        firsts << "video" << v << " " << d_video[v].first_us << " us";
+    }
+    if (start == INT64_MIN)
+        return; // EOF before any stream appeared; nothing to trim
+    if (d_nchan > 0 && d_a_first_us != INT64_MIN && start > d_a_first_us)
         d_a_skip_frames = av_rescale(start - d_a_first_us, d_rate, 1000000);
-    d_v_skip_before_us = start;
-    d_logger->info("initial pts: audio {} us, video {} us -> common start {} us "
-                   "(trimming {} audio sample(s); dropping video frames before it)",
-                   d_a_first_us,
-                   d_v_first_us,
+    for (video_state& vs : d_video)
+        if (vs.first_us != INT64_MIN)
+            vs.skip_before_us = start;
+    d_logger->info("initial pts: {} -> common start {} us (trimming {} audio "
+                   "sample(s); dropping video frames before it)",
+                   firsts.str(),
                    start,
                    d_a_skip_frames);
 }
@@ -731,24 +800,24 @@ void nut_source_impl::check_continuity_audio(const AVPacket* pkt)
     d_a_expect_valid = true;
 }
 
-void nut_source_impl::check_continuity_video(const AVPacket* pkt)
+void nut_source_impl::check_continuity_video(video_state& vs, const AVPacket* pkt)
 {
     const int64_t p_us = pkt_pts_us(pkt);
-    if (p_us != INT64_MIN && d_v_expect_valid &&
-        std::llabs(p_us - d_v_expect_us) > PTS_WARN_US)
+    if (p_us != INT64_MIN && vs.expect_valid &&
+        std::llabs(p_us - vs.expect_us) > PTS_WARN_US)
         d_logger->warn("video pts discontinuity: expected {} us, got {} us (delta {} "
                        "us) — upstream ffmpeg should conform with -fps_mode cfr",
-                       d_v_expect_us,
+                       vs.expect_us,
                        p_us,
-                       p_us - d_v_expect_us);
+                       p_us - vs.expect_us);
     const int64_t dur = video_frame_dur_us(pkt);
     if (dur > 0) {
         const int64_t base =
-            (p_us != INT64_MIN) ? p_us : (d_v_expect_valid ? d_v_expect_us : 0);
-        d_v_expect_us = base + dur;
-        d_v_expect_valid = true;
+            (p_us != INT64_MIN) ? p_us : (vs.expect_valid ? vs.expect_us : 0);
+        vs.expect_us = base + dur;
+        vs.expect_valid = true;
     } else {
-        d_v_expect_valid = false;
+        vs.expect_valid = false;
     }
 }
 
@@ -769,31 +838,33 @@ void nut_source_impl::stage_packet(AVPacket* pkt)
         av_packet_move_ref(d_a_pkt, pkt);
         d_a_staged = true;
         d_a_off = 0;
-    } else if (si == d_video_idx) {
-        if (static_cast<size_t>(pkt->size) != d_frame_bytes) {
+    } else if (int slot = video_slot(si); slot >= 0) {
+        video_state& vs = d_video[slot];
+        if (static_cast<size_t>(pkt->size) != vs.frame_bytes) {
             const int size = pkt->size;
             av_packet_unref(pkt);
             std::ostringstream os;
-            os << "nut_source: video packet of " << size << " bytes, expected "
-               << d_frame_bytes << " (" << d_width << "x" << d_height
+            os << "nut_source: video stream " << slot << " packet of " << size
+               << " bytes, expected " << vs.frame_bytes << " (" << vs.width << "x"
+               << vs.height
                << " rgb24) — mid-stream geometry/pix_fmt change is forbidden";
             throw std::runtime_error(os.str());
         }
         // Initial pts trim: drop frames earlier than the common start.
-        if (d_v_skip_before_us != INT64_MIN) {
+        if (vs.skip_before_us != INT64_MIN) {
             const int64_t p_us = pkt_pts_us(pkt);
             if (p_us != INT64_MIN &&
-                p_us + video_frame_dur_us(pkt) / 2 < d_v_skip_before_us) {
+                p_us + video_frame_dur_us(pkt) / 2 < vs.skip_before_us) {
                 av_packet_unref(pkt);
                 return;
             }
-            d_v_skip_before_us = INT64_MIN; // first kept frame ends the trim
+            vs.skip_before_us = INT64_MIN; // first kept frame ends the trim
         }
-        check_continuity_video(pkt);
-        d_v_staged_pts = (pkt->pts == AV_NOPTS_VALUE) ? 0 : pkt->pts;
-        av_packet_move_ref(d_v_pkt, pkt);
-        d_v_staged = true;
-        d_v_off = 0;
+        check_continuity_video(vs, pkt);
+        vs.staged_pts = (pkt->pts == AV_NOPTS_VALUE) ? 0 : pkt->pts;
+        av_packet_move_ref(vs.pkt, pkt);
+        vs.staged = true;
+        vs.off = 0;
     } else {
         av_packet_unref(pkt);
         throw std::runtime_error(
@@ -843,34 +914,36 @@ void nut_source_impl::flush_audio(int noutput_items,
     }
 }
 
-void nut_source_impl::flush_video(int noutput_items,
+void nut_source_impl::flush_video(int slot,
+                                  int noutput_items,
                                   gr_vector_void_star& output_items,
                                   std::vector<int>& produced)
 {
-    if (!d_v_staged || !d_emit_video)
+    video_state& vs = d_video[slot];
+    if (!vs.staged)
         return;
-    const size_t avail = d_frame_bytes - d_v_off;
-    const size_t space = static_cast<size_t>(noutput_items - produced[d_video_port]);
+    const int port = d_nchan + slot;
+    const size_t avail = vs.frame_bytes - vs.off;
+    const size_t space = static_cast<size_t>(noutput_items - produced[port]);
     const size_t n = std::min(avail, space);
     if (n == 0)
         return;
-    if (d_v_off == 0) {
+    if (vs.off == 0) {
         // One tag per frame, on the frame's first byte.
-        const uint64_t off = nitems_written(d_video_port) + produced[d_video_port];
-        add_item_tag(d_video_port, off, pmt::mp("pts"),
-                     pmt::from_long(static_cast<long>(d_v_staged_pts)));
-        add_item_tag(d_video_port, off, pmt::mp("width"), pmt::from_long(d_width));
-        add_item_tag(d_video_port, off, pmt::mp("height"), pmt::from_long(d_height));
+        const uint64_t off = nitems_written(port) + produced[port];
+        add_item_tag(port, off, pmt::mp("pts"),
+                     pmt::from_long(static_cast<long>(vs.staged_pts)));
+        add_item_tag(port, off, pmt::mp("width"), pmt::from_long(vs.width));
+        add_item_tag(port, off, pmt::mp("height"), pmt::from_long(vs.height));
     }
-    uint8_t* dst =
-        static_cast<uint8_t*>(output_items[d_video_port]) + produced[d_video_port];
-    std::memcpy(dst, d_v_pkt->data + d_v_off, n);
-    produced[d_video_port] += static_cast<int>(n);
-    d_v_off += n;
-    if (d_v_off >= d_frame_bytes) {
-        av_packet_unref(d_v_pkt);
-        d_v_staged = false;
-        d_v_off = 0;
+    uint8_t* dst = static_cast<uint8_t*>(output_items[port]) + produced[port];
+    std::memcpy(dst, vs.pkt->data + vs.off, n);
+    produced[port] += static_cast<int>(n);
+    vs.off += n;
+    if (vs.off >= vs.frame_bytes) {
+        av_packet_unref(vs.pkt);
+        vs.staged = false;
+        vs.off = 0;
     }
 }
 
@@ -905,8 +978,9 @@ int nut_source_impl::general_work(int noutput_items,
     while (true) {
         // 1. Drain the staging areas into the output buffers.
         flush_audio(noutput_items, output_items, produced);
-        flush_video(noutput_items, output_items, produced);
-        if (d_a_staged || d_v_staged)
+        for (int v = 0; v < d_nvideo; v++)
+            flush_video(v, noutput_items, output_items, produced);
+        if (d_a_staged || any_video_staged())
             break; // an output buffer is full; resume on the next call
 
         // 2. Staging is empty: decide whether to read more.

@@ -4,7 +4,7 @@ category: '[NUT]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, ${audio_channels}, False, ${command})
+  make: nut.nut_source(${uri}, ${audio_channels}, 0, ${command})
 
 parameters:
 - id: command

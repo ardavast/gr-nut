@@ -4,7 +4,7 @@ category: '[NUT]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, ${audio_channels}, True, ${command})
+  make: nut.nut_source(${uri}, ${audio_channels}, ${video_streams}, ${command})
 
 parameters:
 - id: command
@@ -20,6 +20,10 @@ parameters:
   label: Audio Channels
   dtype: int
   default: '1'
+- id: video_streams
+  label: Video Streams
+  dtype: int
+  default: '1'
 
 outputs:
 - label: audio
@@ -29,10 +33,12 @@ outputs:
 - label: video
   domain: stream
   dtype: byte
+  multiplicity: ${video_streams}
 
 asserts:
 - ${command != '' or uri != ''}
 - ${audio_channels >= 1}
+- ${video_streams >= 1}
 
 documentation: |-
   Audio + video instance of nut.nut_source: ingests a raw-payload NUT
@@ -70,6 +76,16 @@ documentation: |-
     conforms it to mono @ 48000 Hz + 640x480 @ 25 fps; the command's -ac
     must match Audio Channels, and whatever rate/geometry/fps it produces
     is what the block adopts.
+
+  Multiple video streams: set Video Streams = N and emit N rawvideo
+  streams; the i-th video -map feeds port video_i, each with
+  independently adopted geometry. Example filtergraph producing two
+  differently sized copies plus the audio:
+      -filter_complex "[0:v]split=2[s0][s1];[s0]fps=25,scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1,setsar=1[v0];[s1]fps=25,scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:-1:-1,setsar=1[v1];[0:a]aresample=48000:async=1[a]" \
+      -map "[v0]" -map "[v1]" -map "[a]" ...
+  There is still exactly ONE audio stream; to carry several programs'
+  audio, merge them into its channels (e.g. "[0:a][1:a]amerge=inputs=2[a]"
+  with -ac 4) — each channel comes out on its own float port.
   * NUT File (properties dialog; for users who know what they're doing):
     an externally started ffmpeg writes the FIFO/file named here. Same
     reference command, ending in "-f nut pipe:1 > FIFO".

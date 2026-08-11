@@ -19,8 +19,8 @@ stock GR blocks (see `examples/` for a mono FM transmitter).
 | Audio codec    | `pcm_f32le`, interleaved                                               |
 | Audio rate     | read from the stream headers (adopted at start; cap 192 kHz)           |
 | Audio channels | as declared to the block (structural: fixes the port count)            |
-| Video codec    | `rawvideo`, pix_fmt `rgb24` (only if the block instance declares video)|
-| Video geometry | read from the stream headers (adopted at start; cap 1920×1080); ffmpeg does ALL scaling |
+| Video codec    | one or more `rawvideo`/`rgb24` streams (exactly `video_streams` of them, one byte port each, in ffmpeg `-map` order)|
+| Video geometry | read from the stream headers, adopted per stream (cap 1920×1080 each); ffmpeg does ALL scaling |
 | Video rate     | read from the stream headers; CFR enforced by ffmpeg (`-fps_mode cfr`) |
 | Stream layout  | exactly the declared set of streams — anything else is a hard error    |
 | Interleaving   | muxer bounds skew; always pass `-max_interleave_delta` explicitly      |
@@ -32,7 +32,8 @@ geometry are *not* validated but **adopted** from the headers: the ffmpeg
 command is the single source of truth, and making the downstream
 flowgraph match it (resampler ratios, consumer geometry) is the user's
 responsibility. Adopted values are exposed as `audio_rate()` /
-`video_width()` / `video_height()` (valid after the flowgraph has
+`video_width(i)` / `video_height(i)` (per video stream, `i` defaulting
+to 0; valid after the flowgraph has
 started; 0 before, or if the instance lacks that stream), and a
 mid-stream *change* of the adopted format remains a hard error. All
 flexibility lives on ffmpeg's input side; ffmpeg exists to conform
@@ -110,7 +111,7 @@ any buffer size or pacing behavior. The short version:
   allocated the buffers (allocation happens during `tb.start()` setup,
   before `block::start()` runs), the block requests fixed generous
   defaults in its constructor: **192000 items per audio port** (1 s at
-  the 192 kHz cap) and **4 × 1920×1080×3 bytes ≈ 24.9 MB** on the video
+  the 192 kHz cap) and **4 × 1920×1080×3 bytes ≈ 24.9 MB** on each video
   port. Streams beyond the caps fail promptly at start.
 - These are plain `set_min_output_buffer` requests and remain
   overridable: call `set_min_output_buffer(...)` after construction in
@@ -143,25 +144,27 @@ Python:
 ```python
 from gnuradio import nut
 src = nut.nut_source(uri="/tmp/stream.nut", audio_channels=1,
-                     emit_video=False)
+                     video_streams=0)
 # or spawn mode:
-src = nut.nut_source(uri="", audio_channels=1, emit_video=False,
+src = nut.nut_source(uri="", audio_channels=1, video_streams=0,
                      command="ffmpeg -i song.flac -vn "
                              "-af aresample=48000:async=1 -ac 1 "
                              "-c:a pcm_f32le -max_interleave_delta 500000 "
                              "-f nut pipe:1")
-# after tb.start(): src.audio_rate() / src.video_width() /
-# src.video_height() report the adopted format; src.last_error() is ""
+# after tb.start(): src.audio_rate() / src.video_width(i) /
+# src.video_height(i) report the adopted format (i = video stream); src.last_error() is ""
 # on clean EOF and carries the actionable message on failure.
 ```
 
 GRC (category `[nut]`): three symmetric entries, all instantiating the
 same C++ block and differing only in the declared stream layout:
 
-- **NUT Audio Source** — audio only (`emit_video=False`); one float port
+- **NUT Audio Source** — audio only (`video_streams=0`); one float port
   per channel.
-- **NUT Video Source** — video only (`audio_channels=0`); one byte port.
-- **NUT A/V Source** — both; audio ports plus the video byte port.
+- **NUT Video Source** — video only (`audio_channels=0`); one byte port
+  per video stream.
+- **NUT A/V Source** — both; audio ports plus one byte port per video
+  stream.
 
 One block, three fixed-shape GRC entries: GRC cannot express
 zero-multiplicity port groups, and honest fixed shapes are clearer than

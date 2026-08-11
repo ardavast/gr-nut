@@ -4,7 +4,7 @@ category: '[NUT]'
 
 templates:
   imports: from gnuradio import nut
-  make: nut.nut_source(${uri}, 0, True, ${command})
+  make: nut.nut_source(${uri}, 0, ${video_streams}, ${command})
 
 parameters:
 - id: command
@@ -16,14 +16,20 @@ parameters:
   dtype: string
   default: ''
   hide: part
+- id: video_streams
+  label: Video Streams
+  dtype: int
+  default: '1'
 
 outputs:
 - label: video
   domain: stream
   dtype: byte
+  multiplicity: ${video_streams}
 
 asserts:
 - ${command != '' or uri != ''}
+- ${video_streams >= 1}
 
 documentation: |-
   Video-only instance of nut.nut_source: ingests a raw-payload NUT stream
@@ -55,6 +61,14 @@ documentation: |-
     -stream_loop -1 before -i. The default command is ready to run
     against /tmp/video.mp4 and conforms it to 640x480 @ 25 fps; whatever
     geometry/fps your command produces is what the block adopts.
+
+  Multiple video streams: set Video Streams = N and emit N rawvideo
+  streams; the i-th -map feeds port video_i, each with independently
+  adopted geometry. Example (two differently sized copies of one input):
+      ffmpeg -i INPUT -an \
+        -filter_complex "[0:v]split=2[s0][s1];[s0]fps=25,scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1,setsar=1[v0];[s1]fps=25,scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:-1:-1,setsar=1[v1]" \
+        -map "[v0]" -map "[v1]" -c:v rawvideo -pix_fmt rgb24 -fps_mode cfr \
+        -max_interleave_delta 500000 -f nut pipe:1
   * NUT File (properties dialog; for users who know what they're doing):
     an externally started ffmpeg writes the FIFO/file named here. Same
     reference command, ending in "-f nut pipe:1 > FIFO".

@@ -114,7 +114,9 @@ constructor:
 - **audio ports: 192000 items** per port. Items are 4-byte floats, so
   ~768 kB per channel — exactly 1 s of audio at the 192 kHz cap, ≥ 1 s at
   any adopted rate.
-- **video port: 4 frames at the 1080p cap**:
+- **each video port: 4 frames at the 1080p cap** (the block supports
+  multiple video streams; every one gets its own port and its own
+  cap-sized buffer):
 
       1920 × 1080 × 3 bytes = 6 220 800 bytes per rgb24 frame
       × 4 frames            = 24 883 200 bytes  (~24.9 MB)
@@ -127,8 +129,9 @@ constructor:
   megabytes, so without this request the video path would be broken out
   of the box.
 
-The audio rate and video geometry themselves are **adopted from the NUT
-headers at start** (the ffmpeg command is the single source of truth). If
+The audio rate and each video stream's geometry are **adopted from the
+NUT headers at start** (the ffmpeg command is the single source of
+truth). If
 the adopted format exceeds a cap — audio above 192 kHz, or a frame larger
 than 1920×1080×3 bytes — the block fails promptly at start with a message
 naming the offending size and the cap (`last_error()` carries it; the

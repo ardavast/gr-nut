@@ -43,8 +43,9 @@ namespace nut {
  * Interface contract (a strict profile of NUT):
  *  - container: NUT, streamed, read from a FIFO or file (\p uri);
  *  - audio: pcm_f32le, interleaved, exactly \p audio_channels channels;
- *  - video (only if \p emit_video): rawvideo, pix_fmt rgb24, constant
- *    frame rate;
+ *  - video: exactly \p video_streams separate rawvideo/rgb24 streams,
+ *    each constant frame rate, each with its own independently adopted
+ *    geometry;
  *  - stream layout: exactly the declared set of streams.
  * The audio sample rate and the video geometry/frame rate are NOT block
  * parameters: they are read from the NUT stream headers and adopted at
@@ -91,19 +92,23 @@ namespace nut {
  * Setting both or neither of \p uri / \p command is a constructor error.
  *
  * Outputs: ports 0 .. audio_channels-1 are float audio (deinterleaved,
- * one per channel); if \p emit_video, the last port is an unsigned char
- * stream carrying rgb24 frames back to back (row-major). A stream tag is
- * attached to the first byte of every frame with keys "pts" (int64, in the
- * NUT stream timebase), "width" and "height". Steady-state consumers must
- * not need the tags (geometry is contractual); they exist for diagnostics
- * and alignment.
+ * one per channel); ports audio_channels .. audio_channels+video_streams-1
+ * are unsigned char streams carrying rgb24 frames back to back
+ * (row-major), one port per video stream. The i-th video stream in NUT
+ * stream order — which equals the ffmpeg -map order of the writing
+ * command — feeds port video_i. A stream tag is attached to the first
+ * byte of every frame with keys "pts" (int64, in that stream's NUT
+ * timebase), "width" and "height" (that port's adopted geometry).
+ * Steady-state consumers must not need the tags (geometry is contractual
+ * per run); they exist for diagnostics and alignment.
  *
  * Clocking: the flowgraph sink is the only clock. No Throttle blocks in TX
- * flowgraphs; ffmpeg is paced purely by pipe backpressure. When both audio
- * and video are declared, the initial pts offset between the streams is
- * trimmed at startup so both ports start at the same media time (within
- * one audio sample / one video frame). pts discontinuities beyond a few
- * milliseconds are logged as warnings, never resynced.
+ * flowgraphs; ffmpeg is paced purely by pipe backpressure. When more than
+ * one stream is declared (audio + N video, or several video), the initial
+ * pts offsets are trimmed at startup: every stream is trimmed to the
+ * latest first-pts so all ports start at the same media time (within one
+ * audio sample / one frame of the respective stream). pts discontinuities
+ * beyond a few milliseconds are logged as warnings, never resynced.
  *
  * Buffering rationale (do not shrink these): a multi-output demuxer with
  * bounded output buffers can deadlock when downstream ends in a
@@ -116,7 +121,7 @@ namespace nut {
  * the buffers cannot be sized from the adopted format; the constructor
  * therefore requests fixed generous caps: 192000 items per audio port
  * (1 s at the 192 kHz cap) and 4 * 1920*1080*3 bytes (~24.9 MB, four
- * 1080p frames) on the video port. Streams beyond those caps fail at
+ * 1080p frames) on EACH video port. Streams beyond those caps fail at
  * start(). Note that GR default buffers are tens of kB while a raw frame
  * is MBs — without this the video path would be broken out of the box.
  */
@@ -133,7 +138,10 @@ public:
      *        (deinterleaved); 0 for no audio. Structural: it fixes the
      *        port signature, and the stream must carry exactly this many
      *        channels.
-     * \param emit_video whether the video output port exists
+     * \param video_streams number of rawvideo/rgb24 streams in the
+     *        container == number of byte output ports; 0 for no video.
+     *        Structural: it fixes the port signature. The i-th stream in
+     *        NUT stream order (== ffmpeg -map order) feeds port video_i.
      * \param command full shell command (run via "/bin/sh -c") whose
      *        stdout emits the NUT stream per the contract (spawn mode).
      *        Mutually exclusive with \p uri: exactly one of the two must
@@ -141,7 +149,7 @@ public:
      */
     static sptr make(const std::string& uri,
                      int audio_channels,
-                     bool emit_video,
+                     int video_streams,
                      const std::string& command = "");
 
     /*!
@@ -153,20 +161,22 @@ public:
     virtual int audio_rate() const = 0;
 
     /*!
-     * \brief Video frame width adopted from the stream headers.
+     * \brief Frame width adopted from the headers of video stream
+     *        \p stream (port video_<stream>).
      *
-     * 0 before the flowgraph has started (or if the instance has no
-     * video); valid once tb.start() has returned.
+     * 0 before the flowgraph has started or if the stream index is out of
+     * range; valid once tb.start() has returned.
      */
-    virtual int video_width() const = 0;
+    virtual int video_width(int stream = 0) const = 0;
 
     /*!
-     * \brief Video frame height adopted from the stream headers.
+     * \brief Frame height adopted from the headers of video stream
+     *        \p stream (port video_<stream>).
      *
-     * 0 before the flowgraph has started (or if the instance has no
-     * video); valid once tb.start() has returned.
+     * 0 before the flowgraph has started or if the stream index is out of
+     * range; valid once tb.start() has returned.
      */
-    virtual int video_height() const = 0;
+    virtual int video_height(int stream = 0) const = 0;
 
     /*!
      * \brief The fatal error that terminated the flowgraph, or "" if none.

@@ -14,7 +14,7 @@
 /* BINDTOOL_GEN_AUTOMATIC(0)                                                       */
 /* BINDTOOL_USE_PYGCCXML(0)                                                        */
 /* BINDTOOL_HEADER_FILE(nut_source.h)                                        */
-/* BINDTOOL_HEADER_FILE_HASH(df5c64ff7dbae08f80c6fb446611a5f4)                     */
+/* BINDTOOL_HEADER_FILE_HASH(594d570dae5ec614ea5aa77f69f79516)                     */
 /***********************************************************************************/
 
 #include <pybind11/complex.h>
@@ -39,15 +39,16 @@ void bind_nut_source(py::module& m)
         .def(py::init(&nut_source::make),
              py::arg("uri"),
              py::arg("audio_channels"),
-             py::arg("emit_video"),
+             py::arg("video_streams"),
              py::arg("command") = "",
              D(nut_source, make))
 
         // Format adopted from the NUT stream headers; 0 before the
         // flowgraph has started or if the instance lacks that stream.
+        // video_width/video_height take the video stream index (default 0).
         .def("audio_rate", &nut_source::audio_rate)
-        .def("video_width", &nut_source::video_width)
-        .def("video_height", &nut_source::video_height)
+        .def("video_width", &nut_source::video_width, py::arg("stream") = 0)
+        .def("video_height", &nut_source::video_height, py::arg("stream") = 0)
 
         // Post-constructor failures never throw (GR cannot propagate
         // block-thread exceptions); they are logged at ERROR level and end

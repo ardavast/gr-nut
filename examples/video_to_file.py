@@ -39,7 +39,7 @@ class video_to_file(gr.top_block):
         # Blocks
         ##################################################
 
-        self.nut_nut_source_video_0 = nut.nut_source(uri, 0, True, '')
+        self.nut_nut_source_video_0 = nut.nut_source(uri, 0, 1, '')
         self.blocks_file_sink_0 = blocks.file_sink(gr.sizeof_char*1, outfile, False)
         self.blocks_file_sink_0.set_unbuffered(False)
 
