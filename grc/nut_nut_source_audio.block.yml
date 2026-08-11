@@ -1,6 +1,6 @@
 id: nut_nut_source_audio
 label: NUT Audio Source
-category: '[nut]'
+category: '[NUT]'
 
 templates:
   imports: from gnuradio import nut

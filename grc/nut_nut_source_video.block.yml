@@ -1,6 +1,6 @@
 id: nut_nut_source_video
 label: NUT Video Source
-category: '[nut]'
+category: '[NUT]'
 
 templates:
   imports: from gnuradio import nut
