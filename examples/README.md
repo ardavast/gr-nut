@@ -57,7 +57,8 @@ The `.grc` file opens in gnuradio-companion (with `gr-nut` installed);
 
 ## M3 — video path validation (`video_to_file.grc`, `video_check.sh`)
 
-`video_to_file.grc`: video-only `nut_source` → File Sink. Dumps the rgb24
+`video_to_file.grc`: **NUT Video Source** (video-only `nut_source`) →
+File Sink. Dumps the rgb24
 frame payload back to back into a file. No modulator, no display — this
 example only proves the byte path.
 

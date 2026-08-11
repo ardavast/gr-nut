@@ -116,10 +116,17 @@ src = nut.nut_source(uri="/tmp/stream.nut",
                      repeat=False)
 ```
 
-GRC: block **NUT Source** (category `[nut]`). For a video-only instance
-use **NUT Source (Video Only)** — the same C++ block with
-`audio_channels=0`; it is a separate GRC entry only because GRC cannot
-represent a zero-multiplicity port.
+GRC (category `[nut]`): three symmetric entries, all instantiating the
+same C++ block and differing only in the declared stream layout:
+
+- **NUT Audio Source** — audio only (`emit_video=False`); one float port
+  per channel.
+- **NUT Video Source** — video only (`audio_channels=0`); one byte port.
+- **NUT A/V Source** — both; audio ports plus the video byte port.
+
+One block, three fixed-shape GRC entries: GRC cannot express
+zero-multiplicity port groups, and honest fixed shapes are clearer than
+conditionally hidden ports.
 
 Notes:
 

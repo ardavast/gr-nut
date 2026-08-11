@@ -1,0 +1,88 @@
+id: nut_nut_source_av
+label: NUT A/V Source
+category: '[nut]'
+
+templates:
+  imports: from gnuradio import nut
+  make: nut.nut_source(${uri}, ${audio_channels}, ${audio_rate}, True, ${video_width}, ${video_height}, ${repeat})
+
+parameters:
+- id: uri
+  label: URI (FIFO or file)
+  dtype: string
+  default: '/tmp/stream.nut'
+- id: audio_channels
+  label: Audio Channels
+  dtype: int
+  default: '1'
+- id: audio_rate
+  label: Audio Rate (Hz)
+  dtype: int
+  default: '48000'
+- id: video_width
+  label: Video Width
+  dtype: int
+  default: '320'
+- id: video_height
+  label: Video Height
+  dtype: int
+  default: '240'
+- id: repeat
+  label: Repeat
+  dtype: bool
+  default: 'False'
+  options: ['True', 'False']
+  option_labels: ['Yes', 'No']
+
+outputs:
+- label: audio
+  domain: stream
+  dtype: float
+  multiplicity: ${audio_channels}
+- label: video
+  domain: stream
+  dtype: byte
+
+asserts:
+- ${audio_channels >= 1}
+- ${audio_rate > 0}
+- ${video_width > 0 and video_height > 0}
+
+documentation: |-
+  Audio + video instance of nut.nut_source: ingests a raw-payload NUT
+  stream produced by ffmpeg (from a FIFO or file) and emits deinterleaved
+  float audio (one port per channel) plus rgb24 bytes, frame after frame
+  (row-major). Same C++ block as "NUT Audio Source" and "NUT Video
+  Source" — the three GRC entries only differ in the declared stream
+  layout.
+
+  Contract (a strict profile of NUT; any mismatch is a hard error at
+  start):
+    * audio: pcm_f32le, interleaved, exactly Audio Channels @ Audio Rate
+    * video: rawvideo rgb24, exactly Width x Height, constant frame rate
+    * stream layout: exactly one audio and one video stream
+
+  Reference ffmpeg command:
+    ffmpeg -i INPUT \
+      -filter_complex "[0:v]fps=FPS,scale=W:H:force_original_aspect_ratio=decrease,pad=W:H:-1:-1,setsar=1[v];[0:a]aresample=48000:async=1[a]" \
+      -map "[v]" -map "[a]" -c:v rawvideo -pix_fmt rgb24 -c:a pcm_f32le \
+      -fps_mode cfr -max_interleave_delta 500000 -f nut pipe:1 > FIFO
+
+  The flowgraph sink (SDR/audio device) must be the only clock: do NOT add
+  a Throttle; ffmpeg is paced purely by pipe backpressure (no -re). Always
+  pass -max_interleave_delta explicitly so the muxer bounds A/V interleave
+  skew.
+
+  A stream tag ("pts" in the NUT stream timebase, "width", "height") is
+  attached to the first byte of every video frame. The initial pts offset
+  between audio and video is trimmed at startup so both ports begin at the
+  same media time (within one audio sample / one video frame); pts
+  discontinuities beyond a few ms are logged, never resynced.
+
+  Buffering: the block requests >= 1 s of buffer on each audio port and
+  >= 4 frames on the video port. This is deadlock prevention (the NUT
+  muxer bounds interleave skew via -max_interleave_delta, so buffers
+  larger than the interleave burst guarantee a synchronous downstream
+  combiner can always be fed) — do not shrink these.
+
+file_format: 1

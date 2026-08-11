@@ -7,6 +7,7 @@
 #
 
 install(FILES
-    nut_nut_source.block.yml
+    nut_nut_source_audio.block.yml
     nut_nut_source_video.block.yml
+    nut_nut_source_av.block.yml
     DESTINATION share/gnuradio/grc/blocks)

@@ -66,7 +66,7 @@ class fm_mono_tx(gr.top_block):
                 decimation=6,
                 taps=[],
                 fractional_bw=0)
-        self.nut_nut_source_0 = nut.nut_source(uri, 1, 48000, False, 0, 0, False)
+        self.nut_nut_source_audio_0 = nut.nut_source(uri, 1, 48000, False, 0, 0, False)
         self.analog_wfm_tx_0 = analog.wfm_tx(
         	audio_rate=200000,
         	quad_rate=200000,
@@ -80,7 +80,7 @@ class fm_mono_tx(gr.top_block):
         # Connections
         ##################################################
         self.connect((self.analog_wfm_tx_0, 0), (self.rational_resampler_xxx_1, 0))
-        self.connect((self.nut_nut_source_0, 0), (self.rational_resampler_xxx_0, 0))
+        self.connect((self.nut_nut_source_audio_0, 0), (self.rational_resampler_xxx_0, 0))
         self.connect((self.rational_resampler_xxx_0, 0), (self.analog_wfm_tx_0, 0))
         self.connect((self.rational_resampler_xxx_1, 0), (self.soapy_hackrf_sink_0, 0))
 

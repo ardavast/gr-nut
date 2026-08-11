@@ -1,0 +1,60 @@
+id: nut_nut_source_audio
+label: NUT Audio Source
+category: '[nut]'
+
+templates:
+  imports: from gnuradio import nut
+  make: nut.nut_source(${uri}, ${audio_channels}, ${audio_rate}, False, 0, 0, ${repeat})
+
+parameters:
+- id: uri
+  label: URI (FIFO or file)
+  dtype: string
+  default: '/tmp/stream.nut'
+- id: audio_channels
+  label: Audio Channels
+  dtype: int
+  default: '1'
+- id: audio_rate
+  label: Audio Rate (Hz)
+  dtype: int
+  default: '48000'
+- id: repeat
+  label: Repeat
+  dtype: bool
+  default: 'False'
+  options: ['True', 'False']
+  option_labels: ['Yes', 'No']
+
+outputs:
+- label: audio
+  domain: stream
+  dtype: float
+  multiplicity: ${audio_channels}
+
+asserts:
+- ${audio_channels >= 1}
+- ${audio_rate > 0}
+
+documentation: |-
+  Audio-only instance of nut.nut_source: ingests a raw-payload NUT stream
+  produced by ffmpeg (from a FIFO or file) and emits deinterleaved float
+  audio, one port per channel. Same C++ block as "NUT Video Source" and
+  "NUT A/V Source" — the three GRC entries only differ in the declared
+  stream layout.
+
+  Contract (a strict profile of NUT; any mismatch is a hard error at
+  start): pcm_f32le, interleaved, exactly Audio Channels @ Audio Rate, the
+  only stream in the container.
+
+  Reference ffmpeg command (mono; stereo: -ac 2):
+    ffmpeg -i INPUT -vn -af "aresample=48000:async=1" -ac 1 \
+      -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1 > FIFO
+
+  The flowgraph sink (SDR/audio device) must be the only clock: do NOT add
+  a Throttle; ffmpeg is paced purely by pipe backpressure (no -re).
+
+  Buffering: the block requests >= 1 s of buffer on each audio port
+  (deadlock prevention, see the block header docs) — do not shrink.
+
+file_format: 1

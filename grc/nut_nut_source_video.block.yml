@@ -1,5 +1,5 @@
 id: nut_nut_source_video
-label: NUT Source (Video Only)
+label: NUT Video Source
 category: '[nut]'
 
 templates:
@@ -35,20 +35,31 @@ asserts:
 - ${video_width > 0 and video_height > 0}
 
 documentation: |-
-  The same nut_source block as "NUT Source", instantiated with
-  audio_channels=0 (video-only). It exists as a separate GRC entry only
-  because GRC cannot represent a zero-multiplicity audio port; the C++ and
-  Python APIs use the single nut.nut_source block for every layout.
+  Video-only instance of nut.nut_source: ingests a raw-payload NUT stream
+  produced by ffmpeg (from a FIFO or file) and emits rgb24 bytes, frame
+  after frame (row-major). Same C++ block as "NUT Audio Source" and
+  "NUT A/V Source" — the three GRC entries only differ in the declared
+  stream layout.
 
-  Contract: rawvideo rgb24, exactly Width x Height, constant frame rate,
-  the only stream in the NUT container. rgb24 bytes are emitted frame after
-  frame (row-major); a stream tag ("pts", "width", "height") marks the
-  first byte of every frame.
+  Contract (a strict profile of NUT; any mismatch is a hard error at
+  start): rawvideo rgb24, exactly Width x Height, constant frame rate, the
+  only stream in the container. A stream tag ("pts" in the NUT stream
+  timebase, "width", "height") is attached to the first byte of every
+  frame; steady-state consumers must not need it (geometry is
+  contractual).
 
   Reference ffmpeg command:
     ffmpeg -i INPUT -an \
       -vf "fps=FPS,scale=W:H:force_original_aspect_ratio=decrease,pad=W:H:-1:-1,setsar=1" \
       -c:v rawvideo -pix_fmt rgb24 -fps_mode cfr \
       -max_interleave_delta 500000 -f nut pipe:1 > FIFO
+
+  The flowgraph sink must be the only clock: do NOT add a Throttle; ffmpeg
+  is paced purely by pipe backpressure (no -re).
+
+  Buffering: the block requests >= 4 frames (4 x W x H x 3 bytes) of
+  buffer on the video port (deadlock prevention, see the block header
+  docs; GR default buffers are tens of kB while a raw frame is MBs) — do
+  not shrink.
 
 file_format: 1
