@@ -22,8 +22,27 @@ if(NOT nut_sources)
     return()
 endif(NOT nut_sources)
 
+########################################################################
+# Find libavformat / libavutil / libavcodec (raw NUT demuxing; no decode
+# contexts are created, libavcodec is only used for codec descriptors).
+########################################################################
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FFMPEG IMPORTED_TARGET libavformat libavutil libavcodec)
+if(NOT FFMPEG_FOUND)
+    message(
+        FATAL_ERROR
+            "gr-nut requires the FFmpeg libavformat/libavutil/libavcodec development files.\n"
+            "Debian/Ubuntu: sudo apt install libavformat-dev libavutil-dev libavcodec-dev\n"
+            "Fedora: sudo dnf install ffmpeg-devel")
+endif()
+
+# boost::this_thread::interruption_requested() is used to make blocking pipe
+# reads abort promptly on flowgraph stop (GR work threads are boost threads).
+find_package(Boost REQUIRED COMPONENTS thread)
+
 add_library(gnuradio-nut SHARED ${nut_sources})
-target_link_libraries(gnuradio-nut gnuradio::gnuradio-runtime)
+target_link_libraries(gnuradio-nut gnuradio::gnuradio-runtime PkgConfig::FFMPEG
+                      Boost::thread)
 target_include_directories(
     gnuradio-nut
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>

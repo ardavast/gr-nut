@@ -8,34 +8,102 @@
 #ifndef INCLUDED_NUT_NUT_SOURCE_H
 #define INCLUDED_NUT_NUT_SOURCE_H
 
-#include <gnuradio/nut/api.h>
 #include <gnuradio/block.h>
+#include <gnuradio/nut/api.h>
 
 namespace gr {
-  namespace nut {
+namespace nut {
+
+/*!
+ * \brief Source block that ingests a raw-payload NUT stream (from ffmpeg)
+ *        and emits deinterleaved float audio streams and an optional
+ *        rgb24 video byte stream.
+ * \ingroup nut
+ *
+ * \details
+ * gr-nut is the interface between ffmpeg and GNU Radio for analogue
+ * transmission chains: ffmpeg is the codec/format/sync layer, GNU Radio is
+ * the physical layer, and a NUT stream over a pipe/FIFO is the socket
+ * between them. ffmpeg decodes anything, conforms it to a strict raw
+ * profile, and performs all A/V sync adaptation; this block receives
+ * sample-exact raw streams and never adapts rates — it asserts them.
+ *
+ * Interface contract (a strict profile of NUT):
+ *  - container: NUT, streamed, read from a FIFO or file (\p uri);
+ *  - audio: pcm_f32le, interleaved, exactly \p audio_channels channels at
+ *    exactly \p audio_rate Hz;
+ *  - video (only if \p emit_video): rawvideo, pix_fmt rgb24, exactly
+ *    \p video_width x \p video_height, constant frame rate;
+ *  - stream layout: exactly the declared set of streams.
+ * Any mismatch is a hard error: start() throws std::runtime_error with an
+ * actionable message (the fix is always on the ffmpeg command line).
+ * Mid-stream violations (geometry change, new stream) are hard errors at
+ * the point of detection.
+ *
+ * Reference ffmpeg command (audio-only, mono):
+ * \code
+ * ffmpeg -i INPUT -vn -af "aresample=48000:async=1" -ac 1 \
+ *   -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1 > fifo
+ * \endcode
+ *
+ * Outputs: ports 0 .. audio_channels-1 are float audio (deinterleaved,
+ * one per channel); if \p emit_video, the last port is an unsigned char
+ * stream carrying rgb24 frames back to back (row-major). A stream tag is
+ * attached to the first byte of every frame with keys "pts" (int64, in the
+ * NUT stream timebase), "width" and "height". Steady-state consumers must
+ * not need the tags (geometry is contractual); they exist for diagnostics
+ * and alignment.
+ *
+ * Clocking: the flowgraph sink is the only clock. No Throttle blocks in TX
+ * flowgraphs; ffmpeg is paced purely by pipe backpressure. When both audio
+ * and video are declared, the initial pts offset between the streams is
+ * trimmed at startup so both ports start at the same media time (within
+ * one audio sample / one video frame). pts discontinuities beyond a few
+ * milliseconds are logged as warnings, never resynced.
+ *
+ * Buffering rationale (do not shrink these): a multi-output demuxer with
+ * bounded output buffers can deadlock when downstream ends in a
+ * synchronous combiner — the demuxer blocks pushing stream A into a full
+ * buffer while the consumer is starved of stream B, which the blocked
+ * demuxer would deliver next. Because the NUT muxer bounds interleave skew
+ * (-max_interleave_delta), sizing the output buffers above the maximum
+ * interleave burst breaks the cycle: the constructor requests at least 1 s
+ * of buffer on each audio port and at least 4 frames (4*W*H*3 bytes) on
+ * the video port. Note that GR default buffers are tens of kB while a raw
+ * frame is MBs — without this the video path would be broken out of the
+ * box.
+ */
+class NUT_API nut_source : virtual public gr::block
+{
+public:
+    typedef std::shared_ptr<nut_source> sptr;
 
     /*!
-     * \brief <+description of block+>
-     * \ingroup nut
+     * \brief Create a NUT source.
      *
+     * \param uri path to a FIFO or file containing the NUT stream
+     * \param audio_channels number of float audio output ports
+     *        (deinterleaved); 0 for no audio
+     * \param audio_rate expected audio sample rate in Hz (validated
+     *        against the stream header, never adapted)
+     * \param emit_video whether the video output port exists
+     * \param video_width expected frame width (validated); required if
+     *        emit_video
+     * \param video_height expected frame height (validated); required if
+     *        emit_video
+     * \param repeat on EOF, reopen the input and restart (seekable inputs
+     *        only); otherwise the block signals done
      */
-    class NUT_API nut_source : virtual public gr::block
-    {
-     public:
-      typedef std::shared_ptr<nut_source> sptr;
+    static sptr make(const std::string& uri,
+                     int audio_channels,
+                     int audio_rate,
+                     bool emit_video,
+                     int video_width,
+                     int video_height,
+                     bool repeat);
+};
 
-      /*!
-       * \brief Return a shared_ptr to a new instance of nut::nut_source.
-       *
-       * To avoid accidental use of raw pointers, nut::nut_source's
-       * constructor is in a private implementation
-       * class. nut::nut_source::make is the public interface for
-       * creating new instances.
-       */
-      static sptr make(const std::string& uri, int audio_channels, int audio_rate, bool emit_video, int video_width, int video_height, bool repeat);
-    };
-
-  } // namespace nut
+} // namespace nut
 } // namespace gr
 
 #endif /* INCLUDED_NUT_NUT_SOURCE_H */

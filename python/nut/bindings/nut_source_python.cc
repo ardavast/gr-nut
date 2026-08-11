@@ -14,7 +14,7 @@
 /* BINDTOOL_GEN_AUTOMATIC(0)                                                       */
 /* BINDTOOL_USE_PYGCCXML(0)                                                        */
 /* BINDTOOL_HEADER_FILE(nut_source.h)                                        */
-/* BINDTOOL_HEADER_FILE_HASH(21a8fcab360829a80675c4d5566a14f0)                     */
+/* BINDTOOL_HEADER_FILE_HASH(37a018b12f9af82c8a3d467e5acce447)                     */
 /***********************************************************************************/
 
 #include <pybind11/complex.h>
@@ -37,11 +37,26 @@ void bind_nut_source(py::module& m)
         std::shared_ptr<nut_source>>(m, "nut_source", D(nut_source))
 
         .def(py::init(&nut_source::make),
-           D(nut_source,make)
-        )
-        
+             py::arg("uri"),
+             py::arg("audio_channels"),
+             py::arg("audio_rate"),
+             py::arg("emit_video"),
+             py::arg("video_width"),
+             py::arg("video_height"),
+             py::arg("repeat"),
+             D(nut_source, make))
 
-
+        // start()/stop() are exposed so the contract validation (which runs
+        // in start() and throws std::runtime_error on any stream/profile
+        // mismatch) can be exercised directly, e.g. from the QA tests.
+        .def(
+            "start",
+            [](nut_source& self) { return self.start(); },
+            py::call_guard<py::gil_scoped_release>())
+        .def(
+            "stop",
+            [](nut_source& self) { return self.stop(); },
+            py::call_guard<py::gil_scoped_release>())
 
         ;
 
