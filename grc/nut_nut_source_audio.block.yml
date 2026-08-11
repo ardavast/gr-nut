@@ -10,7 +10,7 @@ parameters:
 - id: command
   label: Spawn Command
   dtype: string
-  default: ''
+  default: 'ffmpeg -loglevel warning -i /tmp/song.mp3 -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1'
 - id: uri
   label: NUT File
   dtype: string
@@ -58,6 +58,10 @@ documentation: |-
     Anything goes (pipelines, curl | ffmpeg, extra filters) as long as
     stdout is contract-conforming NUT; validation at start is the
     guardrail. For seamless looping add -stream_loop -1 before -i.
+    The default command is ready to run against /tmp/song.mp3 and matches
+    the default block parameters; if you edit either side, keep the
+    command's -ac / aresample values in sync with Audio Channels / Audio
+    Rate (start-time validation catches any mismatch).
   * NUT File (properties dialog; for users who know what they're doing):
     an externally started ffmpeg writes the FIFO/file named here. Same
     reference command, ending in "-f nut pipe:1 > FIFO".

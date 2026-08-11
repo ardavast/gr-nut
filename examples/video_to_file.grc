@@ -106,7 +106,10 @@ blocks:
   parameters:
     affinity: ''
     alias: ''
-    comment: video-only instance (audio_channels=0)
+    command: ''
+    comment: 'video-only instance (audio_channels=0);
+
+      external mode: command overridden to empty'
     maxoutbuf: '0'
     minoutbuf: '0'
     uri: uri

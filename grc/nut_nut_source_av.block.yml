@@ -10,7 +10,7 @@ parameters:
 - id: command
   label: Spawn Command
   dtype: string
-  default: ''
+  default: 'ffmpeg -loglevel warning -i /tmp/video.mp4 -filter_complex "[0:v]fps=25,scale=640:480:force_original_aspect_ratio=decrease,pad=640:480:-1:-1,setsar=1[v];[0:a]aresample=48000:async=1[a]" -map "[v]" -map "[a]" -ac 1 -c:v rawvideo -pix_fmt rgb24 -c:a pcm_f32le -fps_mode cfr -max_interleave_delta 500000 -f nut pipe:1'
 - id: uri
   label: NUT File
   dtype: string
@@ -27,11 +27,11 @@ parameters:
 - id: video_width
   label: Video Width
   dtype: int
-  default: '320'
+  default: '640'
 - id: video_height
   label: Video Height
   dtype: int
-  default: '240'
+  default: '480'
 
 outputs:
 - label: audio
@@ -75,6 +75,11 @@ documentation: |-
     Anything goes (pipelines, curl | ffmpeg, extra filters) as long as
     stdout is contract-conforming NUT; validation at start is the
     guardrail. For seamless looping add -stream_loop -1 before -i.
+    The default command is ready to run against /tmp/video.mp4 and
+    matches the default block parameters (mono @ 48000, 640x480 @ 25
+    fps); if you edit either side, keep the command's -ac / aresample /
+    scale/pad / fps values in sync with the block parameters (start-time
+    validation catches any mismatch).
   * NUT File (properties dialog; for users who know what they're doing):
     an externally started ffmpeg writes the FIFO/file named here. Same
     reference command, ending in "-f nut pipe:1 > FIFO".
