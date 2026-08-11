@@ -1,0 +1,147 @@
+options:
+  parameters:
+    author: gr-nut
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    comment: ''
+    copyright: ''
+    description: 'M3 video path validation: NUT video ingest -> raw rgb24 frame dump
+    to a file. No modulator, no display; use video_check.sh to verify the dump
+    byte-exactly against ffmpeg.'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: video_to_file
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: run
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: gr-nut M3 video-to-file dump
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: uri
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: NUT FIFO/file
+    short_id: ''
+    type: str
+    value: /tmp/video.nut
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [232, 8]
+    rotation: 0
+    state: enabled
+- name: width
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: Frame Width
+    short_id: ''
+    type: intx
+    value: '320'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [392, 8]
+    rotation: 0
+    state: enabled
+- name: height
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: Frame Height
+    short_id: ''
+    type: intx
+    value: '240'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [536, 8]
+    rotation: 0
+    state: enabled
+- name: outfile
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: Output raw rgb24 file
+    short_id: ''
+    type: str
+    value: frames.rgb
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [688, 8]
+    rotation: 0
+    state: enabled
+- name: nut_nut_source_video_0
+  id: nut_nut_source_video
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: video-only instance (audio_channels=0)
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    repeat: 'False'
+    uri: uri
+    video_height: height
+    video_width: width
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 156]
+    rotation: 0
+    state: enabled
+- name: blocks_file_sink_0
+  id: blocks_file_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    append: 'False'
+    comment: rgb24 frames, back to back
+    file: outfile
+    type: byte
+    unbuffered: 'False'
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [312, 164]
+    rotation: 0
+    state: enabled
+
+connections:
+- [nut_nut_source_video_0, '0', blocks_file_sink_0, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

@@ -1,0 +1,54 @@
+id: nut_nut_source_video
+label: NUT Source (Video Only)
+category: '[nut]'
+
+templates:
+  imports: from gnuradio import nut
+  make: nut.nut_source(${uri}, 0, 0, True, ${video_width}, ${video_height}, ${repeat})
+
+parameters:
+- id: uri
+  label: URI (FIFO or file)
+  dtype: string
+  default: '/tmp/video.nut'
+- id: video_width
+  label: Video Width
+  dtype: int
+  default: '320'
+- id: video_height
+  label: Video Height
+  dtype: int
+  default: '240'
+- id: repeat
+  label: Repeat
+  dtype: bool
+  default: 'False'
+  options: ['True', 'False']
+  option_labels: ['Yes', 'No']
+
+outputs:
+- label: video
+  domain: stream
+  dtype: byte
+
+asserts:
+- ${video_width > 0 and video_height > 0}
+
+documentation: |-
+  The same nut_source block as "NUT Source", instantiated with
+  audio_channels=0 (video-only). It exists as a separate GRC entry only
+  because GRC cannot represent a zero-multiplicity audio port; the C++ and
+  Python APIs use the single nut.nut_source block for every layout.
+
+  Contract: rawvideo rgb24, exactly Width x Height, constant frame rate,
+  the only stream in the NUT container. rgb24 bytes are emitted frame after
+  frame (row-major); a stream tag ("pts", "width", "height") marks the
+  first byte of every frame.
+
+  Reference ffmpeg command:
+    ffmpeg -i INPUT -an \
+      -vf "fps=FPS,scale=W:H:force_original_aspect_ratio=decrease,pad=W:H:-1:-1,setsar=1" \
+      -c:v rawvideo -pix_fmt rgb24 -fps_mode cfr \
+      -max_interleave_delta 500000 -f nut pipe:1 > FIFO
+
+file_format: 1

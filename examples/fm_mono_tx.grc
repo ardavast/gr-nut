@@ -1,0 +1,221 @@
+options:
+  parameters:
+    author: gr-nut
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    comment: ''
+    copyright: ''
+    description: 'M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM
+    mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF
+    is the only clock; ffmpeg is paced by pipe backpressure. No Throttle.'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: fm_mono_tx
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: run
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: gr-nut M1 mono FM transmitter
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: uri
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: NUT FIFO/file
+    short_id: ''
+    type: str
+    value: /tmp/fm_mono.nut
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [232, 8]
+    rotation: 0
+    state: enabled
+- name: freq
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: Center Frequency (Hz)
+    short_id: ''
+    type: eng_float
+    value: 99.9e6
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [392, 8]
+    rotation: 0
+    state: enabled
+- name: vga_gain
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: HackRF VGA Gain (0-47 dB)
+    short_id: ''
+    type: eng_float
+    value: '40'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [552, 8]
+    rotation: 0
+    state: enabled
+- name: amp
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: HackRF Amp (0/1, +14 dB)
+    short_id: ''
+    type: intx
+    value: '0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [728, 8]
+    rotation: 0
+    state: enabled
+- name: nut_nut_source_0
+  id: nut_nut_source
+  parameters:
+    affinity: ''
+    alias: ''
+    audio_channels: '1'
+    audio_rate: '48000'
+    comment: 'ffmpeg writes the FIFO;
+
+      backpressure paces it'
+    emit_video: 'False'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    repeat: 'False'
+    uri: uri
+    video_height: '0'
+    video_width: '0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 156]
+    rotation: 0
+    state: enabled
+- name: rational_resampler_xxx_0
+  id: rational_resampler_xxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 48 kHz -> 200 kHz (exact 25/6)
+    decim: '6'
+    fbw: '0'
+    interp: '25'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    taps: '[]'
+    type: fff
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [232, 148]
+    rotation: 0
+    state: enabled
+- name: analog_wfm_tx_0
+  id: analog_wfm_tx
+  parameters:
+    affinity: ''
+    alias: ''
+    audio_rate: '200000'
+    comment: 'mono WBFM: +-75 kHz deviation,
+
+      50 us preemphasis, no pilot'
+    fh: '-1.0'
+    max_dev: 75e3
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    quad_rate: '200000'
+    tau: 50e-6
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [432, 148]
+    rotation: 0
+    state: enabled
+- name: rational_resampler_xxx_1
+  id: rational_resampler_xxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 200 kHz -> 8 MHz (exact 40/1)
+    decim: '1'
+    fbw: '0'
+    interp: '40'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    taps: '[]'
+    type: ccc
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [624, 148]
+    rotation: 0
+    state: enabled
+- name: soapy_hackrf_sink_0
+  id: soapy_hackrf_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    amp: bool(amp)
+    bandwidth: '0'
+    center_freq: freq
+    comment: 'the only clock in the graph
+
+      (8 MSPS, HackRF practical minimum)'
+    dev_args: ''
+    samp_rate: 8e6
+    type: fc32
+    vga: vga_gain
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [816, 148]
+    rotation: 0
+    state: enabled
+
+connections:
+- [nut_nut_source_0, '0', rational_resampler_xxx_0, '0']
+- [rational_resampler_xxx_0, '0', analog_wfm_tx_0, '0']
+- [analog_wfm_tx_0, '0', rational_resampler_xxx_1, '0']
+- [rational_resampler_xxx_1, '0', soapy_hackrf_sink_0, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

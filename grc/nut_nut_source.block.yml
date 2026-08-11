@@ -51,11 +51,15 @@ outputs:
 - label: video
   domain: stream
   dtype: byte
-  multiplicity: ${1 if emit_video else 0}
+  optional: true
+  hide: ${not emit_video}
 
 asserts:
-- ${audio_channels >= 0}
-- ${audio_channels > 0 or emit_video}
+# GRC cannot represent a block whose first stream port has multiplicity 0
+# (port counts are clamped to >= 1), so this GRC entry requires audio.
+# For a video-only instance use "NUT Source (Video Only)"
+# (nut_nut_source_video) — same C++ block, audio_channels=0.
+- ${audio_channels > 0}
 - ${(not emit_video) or (video_width > 0 and video_height > 0)}
 
 documentation: |-
