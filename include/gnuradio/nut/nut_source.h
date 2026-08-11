@@ -46,6 +46,31 @@ namespace nut {
  *   -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1 > fifo
  * \endcode
  *
+ * Plumbing — two modes, selected by which of \p uri / \p command is set:
+ *  - external mode (\p uri non-empty, \p command empty): the NUT writer
+ *    (ffmpeg) is launched externally (shell script, systemd unit) and
+ *    writes the FIFO/file named by \p uri;
+ *  - spawn mode (\p uri empty, \p command non-empty): the block runs the
+ *    user-authored \p command via "/bin/sh -c" and reads the NUT stream
+ *    from an anonymous pipe on the child's stdout. The command must emit
+ *    NUT per the contract on stdout (i.e. end in "-f nut pipe:1" or
+ *    "-f nut -"); the reference commands above are the suggested starting
+ *    points. A full shell command keeps all of ffmpeg's power available
+ *    (arbitrary filtergraphs, multiple inputs, pipelines like
+ *    "curl ... | ffmpeg -i - ...") and carries the same trust level as a
+ *    shell script the user would write anyway. The child's stdin is
+ *    redirected to /dev/null (so ffmpeg cannot grab the terminal) and
+ *    stderr is inherited so its diagnostics stay visible. Contract
+ *    validation (§ above) is the guardrail: if the command's output does
+ *    not match the declared parameters, start() throws the usual
+ *    actionable error. The child runs in its own process group, spawned
+ *    in start() before header validation; stop() SIGTERMs the group
+ *    (grace, then SIGKILL) and reaps it — no zombies. With \p repeat,
+ *    EOF respawns the command, which also works for non-seekable inputs
+ *    (URLs, devices) — unlike external-mode repeat. Spawn mode is
+ *    POSIX-only.
+ * Setting both or neither of \p uri / \p command is a constructor error.
+ *
  * Outputs: ports 0 .. audio_channels-1 are float audio (deinterleaved,
  * one per channel); if \p emit_video, the last port is an unsigned char
  * stream carrying rgb24 frames back to back (row-major). A stream tag is
@@ -91,8 +116,13 @@ public:
      *        emit_video
      * \param video_height expected frame height (validated); required if
      *        emit_video
-     * \param repeat on EOF, reopen the input and restart (seekable inputs
-     *        only); otherwise the block signals done
+     * \param repeat on EOF, reopen the input and restart (external mode:
+     *        seekable inputs only; spawn mode: respawns the command, any
+     *        input); otherwise the block signals done
+     * \param command full shell command (run via "/bin/sh -c") whose
+     *        stdout emits the NUT stream per the contract (spawn mode).
+     *        Mutually exclusive with \p uri: exactly one of the two must
+     *        be non-empty.
      */
     static sptr make(const std::string& uri,
                      int audio_channels,
@@ -100,7 +130,8 @@ public:
                      bool emit_video,
                      int video_width,
                      int video_height,
-                     bool repeat);
+                     bool repeat,
+                     const std::string& command = "");
 };
 
 } // namespace nut

@@ -7,7 +7,7 @@
 # GNU Radio Python Flow Graph
 # Title: gr-nut M1 mono FM transmitter
 # Author: gr-nut
-# Description: M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle.
+# Description: M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1" and the block runs ffmpeg itself. Ops variant: fm_mono_tx.sh starts ffmpeg externally and passes --uri FIFO instead.
 # GNU Radio version: 3.10.9.2
 
 from gnuradio import analog
@@ -28,13 +28,14 @@ from gnuradio import soapy
 
 class fm_mono_tx(gr.top_block):
 
-    def __init__(self, uri='/tmp/fm_mono.nut', freq=99.9e6, vga_gain=40, amp=0):
+    def __init__(self, uri='', command='', freq=99.9e6, vga_gain=40, amp=0):
         gr.top_block.__init__(self, "gr-nut M1 mono FM transmitter", catch_exceptions=True)
 
         ##################################################
         # Parameters
         ##################################################
         self.uri = uri
+        self.command = command
         self.freq = freq
         self.vga_gain = vga_gain
         self.amp = amp
@@ -66,7 +67,7 @@ class fm_mono_tx(gr.top_block):
                 decimation=6,
                 taps=[],
                 fractional_bw=0)
-        self.nut_nut_source_audio_0 = nut.nut_source(uri, 1, 48000, False, 0, 0, False)
+        self.nut_nut_source_audio_0 = nut.nut_source(uri, 1, 48000, False, 0, 0, False, command)
         self.analog_wfm_tx_0 = analog.wfm_tx(
         	audio_rate=200000,
         	quad_rate=200000,
@@ -90,6 +91,12 @@ class fm_mono_tx(gr.top_block):
 
     def set_uri(self, uri):
         self.uri = uri
+
+    def get_command(self):
+        return self.command
+
+    def set_command(self, command):
+        self.command = command
 
     def get_freq(self):
         return self.freq
@@ -115,11 +122,14 @@ class fm_mono_tx(gr.top_block):
 
 
 def argument_parser():
-    description = 'M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle.'
+    description = 'M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1" and the block runs ffmpeg itself. Ops variant: fm_mono_tx.sh starts ffmpeg externally and passes --uri FIFO instead.'
     parser = ArgumentParser(description=description)
     parser.add_argument(
-        "--uri", dest="uri", type=str, default='/tmp/fm_mono.nut',
-        help="Set NUT FIFO/file [default=%(default)r]")
+        "--uri", dest="uri", type=str, default='',
+        help="Set NUT FIFO/file (external mode) [default=%(default)r]")
+    parser.add_argument(
+        "--command", dest="command", type=str, default='',
+        help="Set Spawn Command (spawn mode) [default=%(default)r]")
     parser.add_argument(
         "--freq", dest="freq", type=eng_float, default=eng_notation.num_to_str(float(99.9e6)),
         help="Set Center Frequency (Hz) [default=%(default)r]")
@@ -135,7 +145,7 @@ def argument_parser():
 def main(top_block_cls=fm_mono_tx, options=None):
     if options is None:
         options = argument_parser().parse_args()
-    tb = top_block_cls(uri=options.uri, freq=options.freq, vga_gain=options.vga_gain, amp=options.amp)
+    tb = top_block_cls(uri=options.uri, command=options.command, freq=options.freq, vga_gain=options.vga_gain, amp=options.amp)
 
     def sig_handler(sig=None, frame=None):
         tb.stop()

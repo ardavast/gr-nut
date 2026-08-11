@@ -13,6 +13,7 @@ skipped cleanly if ffmpeg is not installed.
 """
 
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -129,6 +130,58 @@ def run_with_timeout(tb, timeout):
         return False
     t.join(10)
     return True
+
+
+def make_wav(tmp, name, seconds, rate=44100):
+    """A stereo s16 wav fixture for spawn-mode tests (decode+conform work)."""
+    path = os.path.join(tmp, name)
+    run_ffmpeg(
+        # fmt: off
+        ["-f", "lavfi", "-i", "sine=frequency=440:duration=%s" % seconds,
+         "-af", "aeval=val(0)|-val(0)", "-ar", str(rate), "-ac", "2", path]
+        # fmt: on
+    )
+    return path
+
+
+def spawn_cmd_audio(path, channels=1, rate=RATE):
+    """The §3 reference audio command, stdout variant, for spawn mode."""
+    return (
+        "ffmpeg -loglevel warning -i %s -vn -af aresample=%d:async=1 -ac %d "
+        "-c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1"
+        % (shlex.quote(path), rate, channels)
+    )
+
+
+def decode_reference(tmp, path, channels=1, rate=RATE):
+    """Direct ffmpeg decode of the fixture with the same conform chain."""
+    ref = os.path.join(tmp, "spawn_ref.f32")
+    run_ffmpeg(
+        # fmt: off
+        ["-i", path, "-vn", "-af", "aresample=%d:async=1" % rate,
+         "-ac", str(channels), "-f", "f32le", ref]
+        # fmt: on
+    )
+    return np.fromfile(ref, dtype=np.float32)
+
+
+def procs_matching(token):
+    """ps lines of any process whose command line contains token."""
+    out = subprocess.run(
+        ["ps", "-eo", "pid=,stat=,args="], capture_output=True, text=True
+    ).stdout
+    return [
+        l for l in out.splitlines() if token in l and "ps -eo" not in l
+    ]
+
+
+def zombie_children():
+    out = subprocess.run(
+        ["ps", "--ppid", str(os.getpid()), "-o", "pid=,stat=,comm="],
+        capture_output=True,
+        text=True,
+    ).stdout
+    return [l for l in out.splitlines() if l.split()[1].startswith("Z")]
 
 
 def tags_by_offset(tags):
@@ -447,6 +500,127 @@ class qa_nut_source(gr_unittest.TestCase):
             self.assertLess(elapsed, 5.0, "shutdown was not prompt: %.1f s" % elapsed)
         finally:
             os.close(wfd)
+
+
+    # ---- spawn mode (POSIX-only; command run via /bin/sh -c) ----------
+
+    def test_015_ctor_uri_command_exclusive(self):
+        with self.assertRaises(ValueError):  # neither given
+            nut.nut_source("", 1, RATE, False, 0, 0, False, command="")
+        with self.assertRaises(ValueError):  # both given
+            nut.nut_source(
+                "x.nut", 1, RATE, False, 0, 0, False, command="ffmpeg ..."
+            )
+
+    @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
+    def test_016_spawn_audio_exact(self):
+        # 44.1k stereo s16 fixture: the spawned command does real decode +
+        # conform work; the block's output must equal a direct ffmpeg CLI
+        # decode of the same fixture through the same filter chain.
+        wav = make_wav(self.tmp, "spawn_fix.wav", seconds=2)
+        ref = decode_reference(self.tmp, wav)
+        src = nut.nut_source(
+            "", 1, RATE, False, 0, 0, False, command=spawn_cmd_audio(wav)
+        )
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self.assertTrue(run_with_timeout(tb, 60), "spawn run did not finish")
+        out = np.array(snk.data(), dtype=np.float32)
+        self.assertEqual(len(out), len(ref))
+        self.assertTrue(
+            np.array_equal(out, ref),
+            "spawn-mode output must match direct ffmpeg decode sample-exactly",
+        )
+        self.assertEqual(zombie_children(), [], "spawned command not reaped")
+
+    @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
+    def test_017_spawn_shutdown_pipeline(self):
+        # The spawn command is a two-process shell pipeline (cat | ffmpeg).
+        # A throttled consumer keeps both alive mid-stream via backpressure;
+        # tb.stop() must return promptly and kill/reap the whole process
+        # group — no survivors of either process, no zombies.
+        token = "qa_nut_spawn_pipeline_fixture.wav"
+        wav = make_wav(self.tmp, token, seconds=60)
+        cmd = "cat %s | %s" % (shlex.quote(wav), spawn_cmd_audio("pipe:0"))
+        src = nut.nut_source("", 1, RATE, False, 0, 0, False, command=cmd)
+        thr = blocks.throttle(gr.sizeof_float, RATE)
+        snk = blocks.null_sink(gr.sizeof_float)
+        tb = gr.top_block()
+        tb.connect(src, thr, snk)
+        tb.start()
+        time.sleep(1.5)
+        self.assertTrue(procs_matching(token), "pipeline did not start")
+        t0 = time.monotonic()
+        tb.stop()
+        done = threading.Event()
+
+        def waiter():
+            tb.wait()
+            done.set()
+
+        threading.Thread(target=waiter, daemon=True).start()
+        self.assertTrue(done.wait(10), "tb.wait() hung after stop() in spawn mode")
+        self.assertLess(time.monotonic() - t0, 5.0, "shutdown was not prompt")
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and (
+            procs_matching(token) or zombie_children()
+        ):
+            time.sleep(0.2)
+        self.assertEqual(
+            procs_matching(token), [], "pipeline processes survived stop()"
+        )
+        self.assertEqual(zombie_children(), [], "zombie child left behind")
+
+    @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
+    def test_018_spawn_repeat_respawn(self):
+        loops = 3
+        wav = make_wav(self.tmp, "spawn_rep.wav", seconds=0.1)
+        ref = decode_reference(self.tmp, wav)
+        src = nut.nut_source(
+            "", 1, RATE, False, 0, 0, True, command=spawn_cmd_audio(wav)
+        )
+        head = blocks.head(gr.sizeof_float, loops * len(ref))
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, head, snk)
+        self.assertTrue(run_with_timeout(tb, 60), "repeat/respawn did not finish")
+        out = np.array(snk.data(), dtype=np.float32)
+        self.assertTrue(
+            np.array_equal(out, np.tile(ref, loops)),
+            "respawn must replay the media back-to-back, sample-exact",
+        )
+        self.assertEqual(zombie_children(), [], "spawned command not reaped")
+
+    @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
+    def test_019_spawn_failing_command(self):
+        # ffmpeg with a nonexistent input: exits nonzero, writes no NUT.
+        # start() must surface it as a RuntimeError pointing at the command.
+        src = nut.nut_source(
+            "", 1, RATE, False, 0, 0, False,
+            command=spawn_cmd_audio("/nonexistent/no_such_media.wav"),
+        )
+        with self.assertRaisesRegex(RuntimeError, r"spawn command"):
+            src.start()
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and zombie_children():
+            time.sleep(0.2)
+        self.assertEqual(zombie_children(), [], "failed command not reaped")
+
+    @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
+    def test_020_spawn_contract_guardrail(self):
+        # A command whose output does not match the declared params must
+        # produce the usual actionable validation error, plus a pointer to
+        # the spawn command.
+        wav = make_wav(self.tmp, "spawn_guard.wav", seconds=0.2)
+        src = nut.nut_source(  # command emits stereo, block declares mono
+            "", 1, RATE, False, 0, 0, False,
+            command=spawn_cmd_audio(wav, channels=2),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, r"channel.*-ac.*check your spawn command"
+        ):
+            src.start()
 
 
 if __name__ == "__main__":

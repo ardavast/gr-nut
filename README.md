@@ -128,17 +128,44 @@ One block, three fixed-shape GRC entries: GRC cannot express
 zero-multiplicity port groups, and honest fixed shapes are clearer than
 conditionally hidden ports.
 
+## Plumbing modes
+
+Exactly one of `uri` / `command` must be set:
+
+- **External mode** (`uri`): ffmpeg is launched externally (shell script,
+  systemd unit) and writes the FIFO/file named by `uri`. See
+  `examples/fm_mono_tx.sh`. `start()` blocks until the writer delivers the
+  NUT stream headers (they are needed for validation), so start ffmpeg
+  first — or at least make sure it will start. `repeat=True` reopens the
+  input on EOF (seekable files only; a FIFO stops at EOF).
+- **Spawn mode** (`command`, POSIX-only): the block runs the full
+  user-authored shell command via `/bin/sh -c` and reads the NUT stream
+  from an anonymous pipe on its stdout. The command must write NUT per the
+  contract to stdout — take the reference commands above and replace
+  `> "$FIFO"` with nothing (keep `-f nut pipe:1`), e.g.:
+
+  ```sh
+  # audio, mono
+  ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 \
+    -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1
+  ```
+
+  Anything goes — extra filters, multiple inputs, pipelines like
+  `curl -s URL | ffmpeg -i - ...` — as long as stdout is
+  contract-conforming NUT; the command carries the same trust level as a
+  shell script you would write anyway, and start-time validation is the
+  guardrail (its errors point back at the spawn command). The child runs
+  in its own process group with stdin from `/dev/null` and stderr
+  inherited; it is spawned in `start()` (no "start ffmpeg first" footgun)
+  and SIGTERM'd/reaped on `stop()` — no zombies. `repeat=True` respawns
+  the command on EOF, which also works for non-seekable inputs (URLs,
+  devices).
+
 Notes:
 
-- ffmpeg is launched externally (shell script, systemd unit); the block is
-  given the FIFO/file path. See `examples/fm_mono_tx.sh`.
-- `start()` blocks until the writer delivers the NUT stream headers (they
-  are needed for validation), so start ffmpeg first — or at least make
-  sure it will start.
-- `repeat=True` reopens the input on EOF (seekable inputs only, i.e. real
-  files); a FIFO stops at EOF.
-- On EOF the block signals done; a dead writer (broken pipe) is EOF plus a
-  logged warning.
+- On EOF the block signals done; a dead writer (broken pipe / child exit)
+  is EOF plus a logged warning, with the spawned command's exit status
+  logged distinctly.
 
 ## Design
 

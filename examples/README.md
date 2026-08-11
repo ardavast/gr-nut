@@ -42,15 +42,30 @@ rational resampler 200k→8M (exact 40/1) → Soapy HackRF sink @ 8 MSPS
 (HackRF's practical minimum). All rate ratios are exact rationals, so with
 the single HackRF clock the inter-stream drift is identically zero.
 
+Two ways to run it:
+
+**Spawn mode (the ergonomics showcase):** the block runs ffmpeg itself —
+one process to start, one Ctrl-C to stop, no FIFO:
+
+```sh
+python3 fm_mono_tx.py --freq 99.9e6 --command \
+  "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 \
+   -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1"
+```
+
+**External mode (the ops variant):** `fm_mono_tx.sh` creates the FIFO,
+starts ffmpeg into it, and passes `--uri` — the shape you'd put in a
+systemd unit:
+
 ```sh
 ./fm_mono_tx.sh some_music.flac 99.9e6 40
 ```
 
 Tune an FM receiver to 99.9 MHz. Acceptance checks: audio is clean, and
 `top` shows ffmpeg CPU near zero while streaming (backpressure pacing).
-Third argument is the HackRF TX VGA gain (0–47 dB); pass `--amp 1` inside
-the python invocation (or edit the script) for the extra +14 dB stage.
-Mind your local spectrum regulations.
+The `.sh`'s third argument is the HackRF TX VGA gain (0–47 dB); pass
+`--amp 1` for the extra +14 dB stage. Mind your local spectrum
+regulations.
 
 The `.grc` file opens in gnuradio-companion (with `gr-nut` installed);
 `fm_mono_tx.py` is the pre-compiled version of it.
@@ -73,9 +88,10 @@ directly with ffmpeg and compares bit for bit:
 
 ## Notes
 
-- Start order is forgiving (both sides block on the FIFO until the peer
-  appears), but the flowgraph waits inside `start()` until ffmpeg has
-  written the NUT headers — so if nothing happens, check that ffmpeg is
-  actually running and writing to the right FIFO.
+- External mode: start order is forgiving (both sides block on the FIFO
+  until the peer appears), but the flowgraph waits inside `start()` until
+  ffmpeg has written the NUT headers — so if nothing happens, check that
+  ffmpeg is actually running and writing to the right FIFO. Spawn mode has
+  no such footgun: the block starts its own writer.
 - If `start()` throws, the message says exactly which ffmpeg option to fix
   (`-ac`/`-ar`/`-c:a`/geometry/`-map`).

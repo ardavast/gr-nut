@@ -1,5 +1,10 @@
 #!/bin/sh
-# gr-nut M1 example: mono FM transmitter (HackRF).
+# gr-nut M1 example: mono FM transmitter (HackRF) — EXTERNAL-mode variant
+# (FIFO plumbing, ffmpeg managed by this script; the shape you'd put in a
+# systemd unit). For quick experiments prefer spawn mode:
+#   python3 fm_mono_tx.py --freq 99.9e6 --command \
+#     "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 \
+#      -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1"
 #
 # usage: fm_mono_tx.sh INPUT [FREQ_HZ] [VGA_GAIN_DB]
 #   INPUT       anything ffmpeg can read (music file, playlist, URL, ...)

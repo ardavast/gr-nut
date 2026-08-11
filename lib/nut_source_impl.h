@@ -13,8 +13,11 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
+#include <mutex>
 #include <string>
 #include <vector>
+
+#include <sys/types.h>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -36,6 +39,8 @@ private:
     const int d_width;
     const int d_height;
     const bool d_repeat;
+    const std::string d_command; // spawn mode: shell command emitting NUT on stdout
+    const bool d_spawn;          // true when d_command is used (uri empty)
     const int d_video_port;      // output port index of the video port (== d_nchan)
     const int d_nports;          // total number of output ports
     const size_t d_frame_bytes;  // W*H*3, one rgb24 frame
@@ -48,6 +53,10 @@ private:
     AVFormatContext* d_fmt = nullptr;
     int d_audio_idx = -1; // stream index of the audio stream, -1 if none
     int d_video_idx = -1; // stream index of the video stream, -1 if none
+
+    // ---- spawned ffmpeg child (spawn mode) ----
+    pid_t d_child = -1;
+    std::mutex d_child_mutex; // stop() signals from another thread
 
     std::atomic<bool> d_stop{ false };
     bool d_eof = false;
@@ -81,6 +90,9 @@ private:
     static int64_t seek_cb(void* opaque, int64_t offset, int whence);
     static int interrupt_cb(void* opaque);
     bool interrupted() const;
+
+    void spawn_child(); // fork/exec "/bin/sh -c command"; throws on failure
+    void terminate_child(bool quiet) noexcept; // TERM group, grace, KILL, waitpid
 
     void open_input();           // open + parse headers + validate; throws
     void close_input() noexcept; // release everything, clear staging
@@ -117,7 +129,8 @@ public:
                     bool emit_video,
                     int video_width,
                     int video_height,
-                    bool repeat);
+                    bool repeat,
+                    const std::string& command);
     ~nut_source_impl() override;
 
     bool start() override;

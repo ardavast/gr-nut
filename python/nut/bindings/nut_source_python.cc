@@ -14,7 +14,7 @@
 /* BINDTOOL_GEN_AUTOMATIC(0)                                                       */
 /* BINDTOOL_USE_PYGCCXML(0)                                                        */
 /* BINDTOOL_HEADER_FILE(nut_source.h)                                        */
-/* BINDTOOL_HEADER_FILE_HASH(37a018b12f9af82c8a3d467e5acce447)                     */
+/* BINDTOOL_HEADER_FILE_HASH(d540e180bba876e65cf5c1a4135b7d05)                     */
 /***********************************************************************************/
 
 #include <pybind11/complex.h>
@@ -44,6 +44,7 @@ void bind_nut_source(py::module& m)
              py::arg("video_width"),
              py::arg("video_height"),
              py::arg("repeat"),
+             py::arg("command") = "",
              D(nut_source, make))
 
         // start()/stop() are exposed so the contract validation (which runs

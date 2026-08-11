@@ -7,7 +7,11 @@ options:
     copyright: ''
     description: 'M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM
     mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF
-    is the only clock; ffmpeg is paced by pipe backpressure. No Throttle.'
+    is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn
+    mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1
+    -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1" and the block
+    runs ffmpeg itself. Ops variant: fm_mono_tx.sh starts ffmpeg externally and
+    passes --uri FIFO instead.'
     gen_linking: dynamic
     generate_options: no_gui
     hier_block_src_path: '.:'
@@ -37,17 +41,44 @@ blocks:
   id: parameter
   parameters:
     alias: ''
-    comment: ''
+    comment: 'external mode: FIFO/file
+
+      written by your own ffmpeg'
     hide: none
-    label: NUT FIFO/file
+    label: NUT FIFO/file (external mode)
     short_id: ''
     type: str
-    value: /tmp/fm_mono.nut
+    value: ''
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
     coordinate: [232, 8]
+    rotation: 0
+    state: enabled
+- name: command
+  id: parameter
+  parameters:
+    alias: ''
+    comment: 'spawn mode: full shell command
+
+      writing NUT to stdout, e.g.
+
+      ffmpeg -i song.flac -vn -af aresample=48000:async=1
+
+      -ac 1 -c:a pcm_f32le -max_interleave_delta 500000
+
+      -f nut pipe:1'
+    hide: none
+    label: Spawn Command (spawn mode)
+    short_id: ''
+    type: str
+    value: ''
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [232, 108]
     rotation: 0
     state: enabled
 - name: freq
@@ -108,9 +139,10 @@ blocks:
     alias: ''
     audio_channels: '1'
     audio_rate: '48000'
-    comment: 'ffmpeg writes the FIFO;
+    command: command
+    comment: 'set exactly one of uri/command;
 
-      backpressure paces it'
+      backpressure paces ffmpeg'
     maxoutbuf: '0'
     minoutbuf: '0'
     repeat: 'False'

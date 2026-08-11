@@ -18,7 +18,9 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 extern "C" {
@@ -93,10 +95,17 @@ nut_source::sptr nut_source::make(const std::string& uri,
                                   bool emit_video,
                                   int video_width,
                                   int video_height,
-                                  bool repeat)
+                                  bool repeat,
+                                  const std::string& command)
 {
-    return gnuradio::make_block_sptr<nut_source_impl>(
-        uri, audio_channels, audio_rate, emit_video, video_width, video_height, repeat);
+    return gnuradio::make_block_sptr<nut_source_impl>(uri,
+                                                      audio_channels,
+                                                      audio_rate,
+                                                      emit_video,
+                                                      video_width,
+                                                      video_height,
+                                                      repeat,
+                                                      command);
 }
 
 nut_source_impl::nut_source_impl(const std::string& uri,
@@ -105,7 +114,8 @@ nut_source_impl::nut_source_impl(const std::string& uri,
                                  bool emit_video,
                                  int video_width,
                                  int video_height,
-                                 bool repeat)
+                                 bool repeat,
+                                 const std::string& command)
     : gr::block("nut_source",
                 gr::io_signature::make(0, 0, 0),
                 gr::io_signature::makev(
@@ -120,10 +130,24 @@ nut_source_impl::nut_source_impl(const std::string& uri,
       d_width(video_width),
       d_height(video_height),
       d_repeat(repeat),
+      d_command(command),
+      d_spawn(uri.empty()),
       d_video_port(audio_channels),
       d_nports(audio_channels + (emit_video ? 1 : 0)),
       d_frame_bytes(emit_video ? size_t(video_width) * video_height * 3 : 0)
 {
+    if (uri.empty() && command.empty())
+        throw std::invalid_argument(
+            "nut_source: no input given — set uri (path to a FIFO/file written by an "
+            "external NUT writer) or command (a shell command emitting NUT on "
+            "stdout, e.g. 'ffmpeg -i ... -f nut pipe:1', to be spawned by the "
+            "block)");
+    if (!uri.empty() && !command.empty())
+        throw std::invalid_argument(
+            "nut_source: uri and command are mutually exclusive — set uri for an "
+            "external NUT writer, or leave it empty and set command to have the "
+            "block spawn the writer itself");
+
     d_rd_pkt = av_packet_alloc();
     d_a_pkt = av_packet_alloc();
     d_v_pkt = av_packet_alloc();
@@ -228,8 +252,122 @@ void nut_source_impl::reset_stream_state()
     d_a_expect_us = d_v_expect_us = 0;
 }
 
+// Spawn mode (POSIX-only): run the user-authored command via /bin/sh -c and
+// read the NUT stream from an anonymous pipe on its stdout. The command
+// carries the same trust level as a shell script the user would write
+// anyway; contract validation in validate_streams() is the guardrail
+// against commands whose output does not match the declared parameters.
+void nut_source_impl::spawn_child()
+{
+    d_logger->info("spawning: /bin/sh -c \"{}\"", d_command);
+
+    int out_pipe[2]; // child's stdout -> our reader
+    int err_pipe[2]; // exec-failure reporting (CLOEXEC survives on success)
+    if (pipe2(out_pipe, O_CLOEXEC) != 0)
+        throw std::runtime_error(std::string("nut_source: pipe2 failed: ") +
+                                 std::strerror(errno));
+    if (pipe2(err_pipe, O_CLOEXEC) != 0) {
+        ::close(out_pipe[0]);
+        ::close(out_pipe[1]);
+        throw std::runtime_error(std::string("nut_source: pipe2 failed: ") +
+                                 std::strerror(errno));
+    }
+
+    const pid_t pid = fork();
+    if (pid < 0) {
+        ::close(out_pipe[0]);
+        ::close(out_pipe[1]);
+        ::close(err_pipe[0]);
+        ::close(err_pipe[1]);
+        throw std::runtime_error(std::string("nut_source: fork failed: ") +
+                                 std::strerror(errno));
+    }
+    if (pid == 0) {
+        // Child. Own process group so stop() can signal the whole pipeline
+        // the shell may create (e.g. curl | ffmpeg). stderr is inherited so
+        // diagnostics stay visible; stdin comes from /dev/null so ffmpeg
+        // cannot grab the terminal.
+        setpgid(0, 0);
+        const int devnull = ::open("/dev/null", O_RDONLY);
+        if (devnull < 0 || dup2(devnull, STDIN_FILENO) < 0 ||
+            dup2(out_pipe[1], STDOUT_FILENO) < 0)
+            _exit(127);
+        execl("/bin/sh", "sh", "-c", d_command.c_str(), (char*)nullptr);
+        const int e = errno;
+        ssize_t n = ::write(err_pipe[1], &e, sizeof(e));
+        (void)n;
+        _exit(127);
+    }
+
+    // Parent. Also set the pgid here to close the fork/kill race.
+    setpgid(pid, pid);
+    ::close(out_pipe[1]);
+    ::close(err_pipe[1]);
+    int exec_errno = 0;
+    const ssize_t n = ::read(err_pipe[0], &exec_errno, sizeof(exec_errno));
+    ::close(err_pipe[0]);
+    if (n > 0) {
+        // exec of /bin/sh failed; the child has already exited.
+        int status = 0;
+        waitpid(pid, &status, 0);
+        ::close(out_pipe[0]);
+        throw std::runtime_error(std::string("nut_source: cannot exec /bin/sh: ") +
+                                 std::strerror(exec_errno));
+    }
+
+    fcntl(out_pipe[0], F_SETFL, O_NONBLOCK);
+    d_fd = out_pipe[0];
+    {
+        std::lock_guard<std::mutex> lock(d_child_mutex);
+        d_child = pid;
+    }
+}
+
+void nut_source_impl::terminate_child(bool quiet) noexcept
+{
+    pid_t pid;
+    {
+        std::lock_guard<std::mutex> lock(d_child_mutex);
+        pid = d_child;
+        d_child = -1;
+    }
+    if (pid <= 0)
+        return;
+
+    int status = 0;
+    auto log_exit = [&](bool killed) {
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0 && !quiet)
+            d_logger->warn(
+                "spawned command exited with status {} — check its stderr above "
+                "(bad path/URL, network error, ...)",
+                WEXITSTATUS(status));
+        else if (killed && !quiet)
+            d_logger->warn("spawned command did not exit on SIGTERM; killed");
+    };
+
+    if (waitpid(pid, &status, WNOHANG) == pid) {
+        // Already exited (e.g. at EOF). Sweep any stragglers of its group.
+        ::kill(-pid, SIGTERM);
+        log_exit(false);
+        return;
+    }
+    // Signal the whole process group: /bin/sh may have spawned a pipeline.
+    ::kill(-pid, SIGTERM);
+    for (int i = 0; i < 40; i++) { // up to ~2 s of grace
+        if (waitpid(pid, &status, WNOHANG) == pid) {
+            log_exit(false);
+            return;
+        }
+        ::poll(nullptr, 0, 50);
+    }
+    ::kill(-pid, SIGKILL);
+    waitpid(pid, &status, 0);
+    log_exit(true);
+}
+
 void nut_source_impl::close_input() noexcept
 {
+    terminate_child(/*quiet=*/d_stop.load());
     if (d_fmt)
         avformat_close_input(&d_fmt);
     if (d_avio) {
@@ -247,18 +385,24 @@ void nut_source_impl::open_input()
 {
     close_input();
 
-    d_saw_writer = false;
-    d_fd = ::open(d_uri.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-    if (d_fd < 0)
-        throw std::runtime_error("nut_source: cannot open '" + d_uri +
-                                 "': " + std::strerror(errno));
-    struct stat st;
-    if (fstat(d_fd, &st) != 0) {
-        close_input();
-        throw std::runtime_error("nut_source: fstat('" + d_uri +
-                                 "') failed: " + std::strerror(errno));
+    if (d_spawn) {
+        spawn_child(); // sets d_fd to the pipe's read end; throws on exec failure
+        d_is_fifo = true;     // anonymous pipe: FIFO read semantics
+        d_saw_writer = true;  // the child holds the write end from the start
+    } else {
+        d_saw_writer = false;
+        d_fd = ::open(d_uri.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (d_fd < 0)
+            throw std::runtime_error("nut_source: cannot open '" + d_uri +
+                                     "': " + std::strerror(errno));
+        struct stat st;
+        if (fstat(d_fd, &st) != 0) {
+            close_input();
+            throw std::runtime_error("nut_source: fstat('" + d_uri +
+                                     "') failed: " + std::strerror(errno));
+        }
+        d_is_fifo = S_ISFIFO(st.st_mode);
     }
-    d_is_fifo = S_ISFIFO(st.st_mode);
 
     auto* iobuf = static_cast<unsigned char*>(av_malloc(AVIO_BUF_SIZE));
     if (!iobuf) {
@@ -291,15 +435,23 @@ void nut_source_impl::open_input()
             "nut_source: libavformat has no NUT demuxer (broken ffmpeg build?)");
     }
 
-    int ret = avformat_open_input(&d_fmt, d_uri.c_str(), infmt, nullptr);
+    const std::string label =
+        d_spawn ? "spawned command \"" + d_command + "\"" : "'" + d_uri + "'";
+    int ret = avformat_open_input(
+        &d_fmt, d_spawn ? "pipe:" : d_uri.c_str(), infmt, nullptr);
     if (ret < 0) {
         // avformat_open_input frees d_fmt on failure; d_avio is still ours.
         std::string why =
             interrupted() ? "interrupted by stop" : averr(ret);
-        close_input();
+        close_input(); // reaps the child in spawn mode (exit status is logged)
         throw std::runtime_error(
-            "nut_source: cannot parse '" + d_uri + "' as a NUT stream (" + why +
-            ") — is the writer running the reference ffmpeg command (-f nut)?");
+            "nut_source: cannot parse NUT stream from " + label + " (" + why +
+            ") — " +
+            (d_spawn ? "check your spawn command: it likely failed (see its stderr "
+                       "above) or does not write NUT to stdout (it must end in "
+                       "'-f nut pipe:1')"
+                     : "is the writer running the reference ffmpeg command "
+                       "(-f nut)?"));
     }
 
     // Raw codecs carry complete parameters in the NUT stream headers; do not
@@ -309,8 +461,8 @@ void nut_source_impl::open_input()
     if (ret < 0) {
         std::string why = interrupted() ? "interrupted by stop" : averr(ret);
         close_input();
-        throw std::runtime_error("nut_source: cannot read stream info from '" + d_uri +
-                                 "' (" + why + ")");
+        throw std::runtime_error("nut_source: cannot read stream info from " + label +
+                                 " (" + why + ")");
     }
 
     try {
@@ -340,6 +492,7 @@ void nut_source_impl::validate_streams()
         }
     }
 
+    const char* hint = d_spawn ? " (check your spawn command)" : "";
     const int want_audio = d_nchan > 0 ? 1 : 0;
     const int want_video = d_emit_video ? 1 : 0;
     if (n_audio != want_audio || n_video != want_video || n_other != 0) {
@@ -347,7 +500,7 @@ void nut_source_impl::validate_streams()
         os << "nut_source: stream layout mismatch: expected exactly " << want_audio
            << " audio and " << want_video << " video stream(s), found " << n_audio
            << " audio, " << n_video << " video, " << n_other
-           << " other — fix the ffmpeg -map/-vn/-an options";
+           << " other — fix the ffmpeg -map/-vn/-an options" << hint;
         throw std::runtime_error(os.str());
     }
 
@@ -360,7 +513,7 @@ void nut_source_impl::validate_streams()
             os << "nut_source: expected " << d_nchan << " audio channel(s) @ " << d_rate
                << " Hz pcm_f32le, stream has " << ch << " channel(s) @ "
                << cp->sample_rate << " Hz " << codec_name(cp->codec_id)
-               << " — fix the ffmpeg -ac/-ar/-c:a options";
+               << " — fix the ffmpeg -ac/-ar/-c:a options" << hint;
             throw std::runtime_error(os.str());
         }
     }
@@ -373,7 +526,7 @@ void nut_source_impl::validate_streams()
             os << "nut_source: expected rawvideo/rgb24 " << d_width << "x" << d_height
                << ", stream has " << codec_name(cp->codec_id) << "/"
                << pix_fmt_name(cp->format) << " " << cp->width << "x" << cp->height
-               << " — fix the ffmpeg -c:v/-pix_fmt/scale options";
+               << " — fix the ffmpeg -c:v/-pix_fmt/scale options" << hint;
             throw std::runtime_error(os.str());
         }
     }
@@ -389,11 +542,14 @@ bool nut_source_impl::start()
 
 bool nut_source_impl::stop()
 {
-    // Only raise the flag here: the work thread may still be inside
-    // av_read_frame(); the AVIO interrupt callback / read loop will observe
-    // the flag and unblock. Resources are released in the destructor (or on
-    // the next start()).
+    // Raise the flag: the work thread may still be inside av_read_frame();
+    // the AVIO interrupt callback / read loop will observe it and unblock.
+    // In spawn mode also terminate and reap the child here (signals and
+    // waitpid only — safe concurrently with the work thread; the resulting
+    // pipe EOF wakes a blocked read immediately). fds/contexts are released
+    // in the destructor (or on the next start()).
     d_stop.store(true);
+    terminate_child(/*quiet=*/true);
     return true;
 }
 
@@ -658,14 +814,17 @@ void nut_source_impl::flush_video(int noutput_items,
 
 bool nut_source_impl::try_reopen()
 {
-    if (d_is_fifo) {
+    // Spawn mode can always repeat: the child is simply respawned, which
+    // re-reads the media from its start — this works even for non-seekable
+    // inputs (URLs, devices). External mode needs a reopenable file.
+    if (!d_spawn && d_is_fifo) {
         d_logger->warn(
             "repeat requested but '{}' is a FIFO (not reopenable); stopping at EOF",
             d_uri);
         return false;
     }
     try {
-        open_input(); // closes the old input, resets pts bookkeeping
+        open_input(); // closes the old input (reaps the child), resets pts state
     } catch (const std::exception& e) {
         d_logger->error("repeat: reopen failed: {}", e.what());
         return false;
@@ -711,6 +870,10 @@ int nut_source_impl::general_work(int noutput_items,
             break;
         }
         if (d_eof) {
+            if (d_spawn)
+                // Reap promptly; a nonzero exit status is logged distinctly
+                // (EOF caused by a failing child, not by end of media).
+                terminate_child(/*quiet=*/false);
             if (d_repeat && try_reopen())
                 continue;
             done = true;
