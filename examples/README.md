@@ -96,5 +96,7 @@ directly with ffmpeg and compares bit for bit:
   ffmpeg has written the NUT headers — so if nothing happens, check that
   ffmpeg is actually running and writing to the right FIFO. Spawn mode has
   no such footgun: the block starts its own writer.
-- If `start()` throws, the message says exactly which ffmpeg option to fix
-  (`-ac`/`-ar`/`-c:a`/geometry/`-map`).
+- On a contract mismatch or a failing command the flowgraph stops by
+  itself and an ERROR log says exactly which ffmpeg option to fix
+  (`-ac`/`-ar`/`-c:a`/geometry/`-map`); from Python,
+  `src.last_error()` returns the same message ("" means clean EOF).

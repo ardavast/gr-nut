@@ -28,6 +28,18 @@ namespace nut {
  * profile, and performs all A/V sync adaptation; this block receives
  * sample-exact raw streams and never adapts rates — it asserts them.
  *
+ * Error model: constructor-time misuse (both or neither of uri/command,
+ * invalid parameter values) throws std::invalid_argument in the caller's
+ * thread. Everything after construction — open/spawn failures, contract
+ * validation, mid-stream violations — cannot throw usefully: GNU Radio
+ * runs start() and work() inside the block's scheduler thread, whose
+ * wrapper catches exceptions and would kill only that thread while the
+ * rest of the flowgraph hangs. Such failures are therefore logged at
+ * ERROR level with the same actionable messages, and the block terminates
+ * the flowgraph cleanly (WORK_DONE). After tb.run()/tb.wait() returns,
+ * last_error() distinguishes failure (non-empty message) from clean EOF
+ * (empty).
+ *
  * Interface contract (a strict profile of NUT):
  *  - container: NUT, streamed, read from a FIFO or file (\p uri);
  *  - audio: pcm_f32le, interleaved, exactly \p audio_channels channels at
@@ -127,6 +139,18 @@ public:
                      int video_width,
                      int video_height,
                      const std::string& command = "");
+
+    /*!
+     * \brief The fatal error that terminated the flowgraph, or "" if none.
+     *
+     * Post-constructor failures (open/spawn failure, contract validation,
+     * mid-stream violations) cannot propagate as exceptions from a GR
+     * block thread; they are logged at ERROR level and end the flowgraph
+     * cleanly instead. Call this after tb.run()/tb.wait() returns to
+     * distinguish failure (non-empty, the same actionable message that
+     * was logged) from clean EOF (empty).
+     */
+    virtual std::string last_error() const = 0;
 };
 
 } // namespace nut

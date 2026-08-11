@@ -528,11 +528,40 @@ void nut_source_impl::validate_streams()
     }
 }
 
+void nut_source_impl::fail(const std::string& msg)
+{
+    d_logger->error("{}", msg);
+    {
+        std::lock_guard<std::mutex> lock(d_error_mutex);
+        d_error = msg;
+    }
+    d_failed.store(true);
+}
+
+std::string nut_source_impl::last_error() const
+{
+    std::lock_guard<std::mutex> lock(d_error_mutex);
+    return d_error;
+}
+
 bool nut_source_impl::start()
 {
     d_stop.store(false);
     d_eof = false;
-    open_input();
+    d_failed.store(false);
+    {
+        std::lock_guard<std::mutex> lock(d_error_mutex);
+        d_error.clear();
+    }
+    // start() runs inside the block's scheduler thread; an exception here
+    // would be swallowed by GR's thread wrapper, killing only this thread
+    // while the rest of the flowgraph hangs. Convert failures to a logged
+    // ERROR + clean flowgraph termination instead (see header docs).
+    try {
+        open_input();
+    } catch (const std::exception& e) {
+        fail(e.what());
+    }
     return true;
 }
 
@@ -823,6 +852,9 @@ int nut_source_impl::general_work(int noutput_items,
     (void)ninput_items;
     (void)input_items;
 
+    if (d_failed.load())
+        return WORK_DONE; // fatal error latched (e.g. in start()); stop cleanly
+
     std::vector<int> produced(d_nports, 0);
     const auto produced_any = [&produced] {
         for (int p : produced)
@@ -832,6 +864,7 @@ int nut_source_impl::general_work(int noutput_items,
     };
 
     bool done = false;
+    try {
     while (true) {
         // 1. Drain the staging areas into the output buffers.
         flush_audio(noutput_items, output_items, produced);
@@ -877,6 +910,13 @@ int nut_source_impl::general_work(int noutput_items,
                            "die?",
                            averr(ret));
         d_eof = true;
+    }
+    } catch (const std::exception& e) {
+        // Mid-stream contract violation (layout/geometry change, oversized
+        // interleave burst, ...). Same conversion as in start(): log ERROR,
+        // latch, terminate the flowgraph cleanly.
+        fail(e.what());
+        return WORK_DONE;
     }
 
     if (produced_any()) {

@@ -25,10 +25,19 @@ stock GR blocks (see `examples/` for a mono FM transmitter).
 | Stream layout  | exactly the declared set of streams — anything else is a hard error    |
 | Interleaving   | muxer bounds skew; always pass `-max_interleave_delta` explicitly      |
 
-The block **validates** this profile at `start()` and throws
-`std::runtime_error` with an actionable message on any mismatch — it never
-adapts. All flexibility lives on ffmpeg's input side; ffmpeg exists to
-conform arbitrary media to this profile.
+The block **validates** this profile at `start()` and fails loudly on any
+mismatch — it never adapts. All flexibility lives on ffmpeg's input side;
+ffmpeg exists to conform arbitrary media to this profile.
+
+Error model: GNU Radio cannot propagate exceptions out of a block thread
+(they would kill one thread and hang the rest of the flowgraph), so
+post-constructor failures — open/spawn failure, contract validation,
+mid-stream violations — are logged at ERROR level with an actionable
+message and terminate the flowgraph cleanly. After `tb.run()`/`tb.wait()`
+returns, `last_error()` returns that message (empty string = clean EOF),
+so scripts can tell failure from end-of-media. Constructor misuse
+(both/neither of `uri`/`command`, invalid parameters) still raises
+normally in the calling thread.
 
 Reference ffmpeg invocations:
 

@@ -60,6 +60,11 @@ private:
     std::atomic<bool> d_stop{ false };
     bool d_eof = false;
 
+    // ---- fatal-error latch (see nut_source.h "Error model") ----
+    std::atomic<bool> d_failed{ false };
+    mutable std::mutex d_error_mutex;
+    std::string d_error; // guarded by d_error_mutex
+
     // ---- one-packet staging area per stream (§4.3 of the design) ----
     AVPacket* d_rd_pkt = nullptr; // scratch packet for av_read_frame
     AVPacket* d_a_pkt = nullptr;  // staged audio packet
@@ -89,6 +94,10 @@ private:
     static int64_t seek_cb(void* opaque, int64_t offset, int whence);
     static int interrupt_cb(void* opaque);
     bool interrupted() const;
+
+    // Log msg at ERROR level, latch it for last_error(), mark the block
+    // failed (work() then returns WORK_DONE immediately).
+    void fail(const std::string& msg);
 
     void spawn_child(); // fork/exec "/bin/sh -c command"; throws on failure
     void terminate_child(bool quiet) noexcept; // TERM group, grace, KILL, waitpid
@@ -132,6 +141,7 @@ public:
 
     bool start() override;
     bool stop() override;
+    std::string last_error() const override;
 
     void forecast(int noutput_items, gr_vector_int& ninput_items_required) override;
 

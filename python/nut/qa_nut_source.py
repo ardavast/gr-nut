@@ -353,28 +353,53 @@ class qa_nut_source(gr_unittest.TestCase):
         )
 
     # ---- 4. contract validation errors --------------------------------
+    #
+    # Post-constructor failures never raise: GR cannot propagate exceptions
+    # out of a block thread (they would kill one thread and hang the rest
+    # of the flowgraph). The black-box contract is: tb.run() terminates
+    # promptly on its own, zero samples are produced, and last_error()
+    # carries the actionable message that was logged at ERROR level.
+
+    def _run_expect_failure(self, src, tb, sinks, regex):
+        t0 = time.monotonic()
+        self.assertTrue(
+            run_with_timeout(tb, 15),
+            "failing flowgraph must terminate on its own, not hang",
+        )
+        self.assertLess(time.monotonic() - t0, 10.0, "termination was not prompt")
+        for s in sinks:
+            self.assertEqual(len(s.data()), 0, "no samples on failure")
+        err = src.last_error()
+        self.assertNotEqual(err, "", "last_error() must be set on failure")
+        self.assertRegex(err, regex)
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_006_validation_channel_count(self):
         inter = np.zeros(2 * 1024, dtype=np.float32)
         uri = mux_audio(self.tmp, inter, 2)  # stereo fixture
         src = nut.nut_source(uri, 1, RATE, False, 0, 0)  # declared mono
-        with self.assertRaisesRegex(RuntimeError, r"channel.*-ac"):
-            src.start()
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self._run_expect_failure(src, tb, [snk], r"channel.*-ac")
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_007_validation_sample_rate(self):
         uri = mux_audio(self.tmp, sine(4410, rate=44100), 1, rate=44100)
         src = nut.nut_source(uri, 1, RATE, False, 0, 0)
-        with self.assertRaisesRegex(RuntimeError, r"48000 Hz.*44100 Hz"):
-            src.start()
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self._run_expect_failure(src, tb, [snk], r"48000 Hz.*44100 Hz")
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_008_validation_codec(self):
         uri = mux_audio(self.tmp, sine(1024), 1, codec="pcm_s16le")
         src = nut.nut_source(uri, 1, RATE, False, 0, 0)
-        with self.assertRaisesRegex(RuntimeError, r"pcm_f32le.*pcm_s16le"):
-            src.start()
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self._run_expect_failure(src, tb, [snk], r"pcm_f32le.*pcm_s16le")
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_009_validation_geometry(self):
@@ -390,15 +415,28 @@ class qa_nut_source(gr_unittest.TestCase):
                     "-max_interleave_delta", "500000", "-f", "nut", uri])
         # fmt: on
         src = nut.nut_source(uri, 0, 0, True, 32, 24)  # declared 32x24
-        with self.assertRaisesRegex(RuntimeError, r"32x24.*64x48"):
-            src.start()
+        snk = blocks.vector_sink_b()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self._run_expect_failure(src, tb, [snk], r"32x24.*64x48")
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_010_validation_stream_layout(self):
         uri = mux_audio(self.tmp, sine(1024), 1)  # audio-only fixture
         src = nut.nut_source(uri, 1, RATE, True, 32, 24)  # video declared
-        with self.assertRaisesRegex(RuntimeError, r"stream layout"):
-            src.start()
+        snk_a = blocks.vector_sink_f()
+        snk_v = blocks.vector_sink_b()
+        tb = gr.top_block()
+        tb.connect((src, 0), snk_a)
+        tb.connect((src, 1), snk_v)
+        self._run_expect_failure(src, tb, [snk_a, snk_v], r"stream layout")
+
+    def test_010a_external_nonexistent_uri(self):
+        src = nut.nut_source("/nonexistent/no_such.nut", 1, RATE, False, 0, 0)
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self._run_expect_failure(src, tb, [snk], r"cannot open.*no_such\.nut")
 
     # ---- 5. deadlock regression ---------------------------------------
 
@@ -439,6 +477,7 @@ class qa_nut_source(gr_unittest.TestCase):
         tb.connect(src, snk)
         self.assertTrue(run_with_timeout(tb, 30), "flowgraph did not finish at EOF")
         self.assertTrue(np.array_equal(np.array(snk.data(), dtype=np.float32), ref))
+        self.assertEqual(src.last_error(), "", "clean EOF must leave last_error() empty")
 
     # ---- 7. shutdown with a stalled writer ----------------------------
 
@@ -556,14 +595,19 @@ class qa_nut_source(gr_unittest.TestCase):
 
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_019_spawn_failing_command(self):
-        # ffmpeg with a nonexistent input: exits nonzero, writes no NUT.
-        # start() must surface it as a RuntimeError pointing at the command.
+        # THE reported-bug regression test: ffmpeg with a nonexistent input
+        # exits nonzero and writes no NUT. Previously the start()-path
+        # throw killed only the block thread and tb.run() hung forever;
+        # now the flowgraph must terminate promptly on its own with
+        # last_error() pointing at the spawn command.
         src = nut.nut_source(
             "", 1, RATE, False, 0, 0,
             command=spawn_cmd_audio("/nonexistent/no_such_media.wav"),
         )
-        with self.assertRaisesRegex(RuntimeError, r"spawn command"):
-            src.start()
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self._run_expect_failure(src, tb, [snk], r"spawn command")
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline and zombie_children():
             time.sleep(0.2)
@@ -572,17 +616,19 @@ class qa_nut_source(gr_unittest.TestCase):
     @unittest.skipUnless(FFMPEG, "ffmpeg CLI not found")
     def test_020_spawn_contract_guardrail(self):
         # A command whose output does not match the declared params must
-        # produce the usual actionable validation error, plus a pointer to
-        # the spawn command.
+        # terminate the flowgraph with the usual actionable validation
+        # message, plus a pointer to the spawn command.
         wav = make_wav(self.tmp, "spawn_guard.wav", seconds=0.2)
         src = nut.nut_source(  # command emits stereo, block declares mono
             "", 1, RATE, False, 0, 0,
             command=spawn_cmd_audio(wav, channels=2),
         )
-        with self.assertRaisesRegex(
-            RuntimeError, r"channel.*-ac.*check your spawn command"
-        ):
-            src.start()
+        snk = blocks.vector_sink_f()
+        tb = gr.top_block()
+        tb.connect(src, snk)
+        self._run_expect_failure(
+            src, tb, [snk], r"channel.*-ac.*check your spawn command"
+        )
 
 
 if __name__ == "__main__":

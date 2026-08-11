@@ -14,7 +14,7 @@
 /* BINDTOOL_GEN_AUTOMATIC(0)                                                       */
 /* BINDTOOL_USE_PYGCCXML(0)                                                        */
 /* BINDTOOL_HEADER_FILE(nut_source.h)                                        */
-/* BINDTOOL_HEADER_FILE_HASH(62036068cbdc4aba446e07d5f8993372)                     */
+/* BINDTOOL_HEADER_FILE_HASH(2f3b154294d3dfa3baef86ada454c91b)                     */
 /***********************************************************************************/
 
 #include <pybind11/complex.h>
@@ -46,9 +46,13 @@ void bind_nut_source(py::module& m)
              py::arg("command") = "",
              D(nut_source, make))
 
-        // start()/stop() are exposed so the contract validation (which runs
-        // in start() and throws std::runtime_error on any stream/profile
-        // mismatch) can be exercised directly, e.g. from the QA tests.
+        // Post-constructor failures never throw (GR cannot propagate
+        // block-thread exceptions); they are logged at ERROR level and end
+        // the flowgraph cleanly. last_error() is the programmatic signal:
+        // non-empty after tb.run()/wait() means the block failed, "" means
+        // clean EOF.
+        .def("last_error", &nut_source::last_error)
+
         .def(
             "start",
             [](nut_source& self) { return self.start(); },
