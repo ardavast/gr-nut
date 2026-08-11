@@ -1,17 +1,20 @@
 title: The NUT OOT Module
-brief: Short description of gr-nut
-tags: # Tags are arbitrary, but look at CGRAN what other authors are using
+brief: Generic ffmpeg-to-GNU-Radio ingest over a strict NUT profile
+tags:
   - sdr
+  - ffmpeg
+  - nut
+  - source
 author:
-  - Author Name <authors@email.address>
+  - Ardavast Dayleryan <ardavast@noiseoverip.com>
 copyright_owner:
-  - Copyright Owner 1
-license:
-gr_supported_version: # Put a comma separated list of supported GR versions here
-#repo: # Put the URL of the repository here, or leave blank for default
-#website: <module_website> # If you have a separate project website, put it here
-#icon: <icon_url> # Put a URL to a square image here that will be used as an icon on CGRAN
+  - Ardavast Dayleryan
+license: GPL-3.0-or-later
+gr_supported_version: 3.10
+repo: https://github.com/ardavast/gr-nut
 ---
-A longer, multi-line description of gr-nut.
-You may use some *basic* Markdown here.
-If left empty, it will try to find a README file instead.
+A source block that feeds GNU Radio flowgraphs from ffmpeg over a pipe,
+using a strict NUT profile (pcm_f32le audio + rawvideo/rgb24) as the
+interface. ffmpeg handles codecs, formats, and A/V sync; GNU Radio is the
+physical layer and the SDR sink is the only clock — ffmpeg is paced purely
+by pipe backpressure, so there is no Throttle and no drift between streams.
