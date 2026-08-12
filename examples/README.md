@@ -1,46 +1,19 @@
 # gr-nut examples
 
-## The contract in one paragraph
+Two example flowgraphs: a mono FM transmitter (the first real
+transmission chain) and a file-based video-path check. The interface
+contract and the ffmpeg command shapes they rely on are documented in
+[docs/contract.md](../docs/contract.md); the buffering/clocking model in
+[docs/buffering.md](../docs/buffering.md).
 
-ffmpeg is the codec/format/sync layer, GNU Radio is the physical layer, and
-a NUT stream over a FIFO is the socket between them. ffmpeg decodes
-anything and conforms it to a strict raw profile: audio `pcm_f32le`
-interleaved at the declared rate/channel count; video `rawvideo` `rgb24` at
-exactly the declared geometry, CFR. `nut_source` validates the profile at
-start (hard error on any mismatch) and never adapts rates. The flowgraph
-sink (SDR, audio device) is the only clock — **no Throttle blocks, no
-`-re`**; ffmpeg is paced purely by pipe backpressure. Always pass
-`-max_interleave_delta` explicitly so the muxer bounds A/V interleave skew.
+## Mono FM transmitter (`fm_mono_tx.grc` / `.sh`)
 
-Reference ffmpeg commands:
-
-```sh
-# audio-only, mono (M1)
-ffmpeg -i INPUT \
-  -vn -af "aresample=48000:async=1" -ac 1 \
-  -c:a pcm_f32le \
-  -max_interleave_delta 500000 \
-  -f nut pipe:1 > "$FIFO"
-
-# audio-only, stereo: same with -ac 2
-
-# audio + video (generic)
-ffmpeg -i INPUT \
-  -filter_complex "[0:v]fps=FPS,scale=W:H:force_original_aspect_ratio=decrease,pad=W:H:-1:-1,setsar=1[v]; \
-                   [0:a]aresample=48000:async=1[a]" \
-  -map "[v]" -map "[a]" \
-  -c:v rawvideo -pix_fmt rgb24 -c:a pcm_f32le \
-  -fps_mode cfr -max_interleave_delta 500000 \
-  -f nut pipe:1 > "$FIFO"
-```
-
-## M1 — mono FM transmitter (`fm_mono_tx.grc` / `.sh`)
-
-Chain: `nut_source(1 ch, 48 kHz)` → rational resampler 48k→200k (exact
-25/6) → WBFM mod (±75 kHz deviation, 50 µs pre-emphasis, mono, no pilot) →
-rational resampler 200k→8M (exact 40/1) → Soapy HackRF sink @ 8 MSPS
-(HackRF's practical minimum). All rate ratios are exact rationals, so with
-the single HackRF clock the inter-stream drift is identically zero.
+Chain: `nut_source` (1 ch; the ffmpeg command sets 48 kHz, which the
+block adopts) → rational resampler 48k→200k (exact 25/6) → WBFM mod
+(±75 kHz deviation, 50 µs pre-emphasis, mono, no pilot) → rational
+resampler 200k→8M (exact 40/1) → Soapy HackRF sink @ 8 MSPS (HackRF's
+practical minimum). All rate ratios are exact rationals, so with the
+single HackRF clock the inter-stream drift is identically zero.
 
 Two ways to run it:
 
@@ -73,12 +46,11 @@ regulations.
 The `.grc` file opens in gnuradio-companion (with `gr-nut` installed);
 `fm_mono_tx.py` is the pre-compiled version of it.
 
-## M3 — video path validation (`video_to_file.grc`, `video_check.sh`)
+## Video path validation (`video_to_file.grc`, `video_check.sh`)
 
 `video_to_file.grc`: **NUT Video Source** (video-only `nut_source`) →
-File Sink. Dumps the rgb24
-frame payload back to back into a file. No modulator, no display — this
-example only proves the byte path.
+File Sink. Dumps the rgb24 frame payload back to back into a file. No
+modulator, no display — this example only proves the byte path.
 
 `video_check.sh` runs the whole loop unattended: ffmpeg `testsrc2` pattern
 → NUT FIFO → flowgraph → `frames.rgb`, then renders the same pattern
@@ -98,5 +70,5 @@ directly with ffmpeg and compares bit for bit:
   no such footgun: the block starts its own writer.
 - On a contract mismatch or a failing command the flowgraph stops by
   itself and an ERROR log says exactly which ffmpeg option to fix
-  (`-ac`/`-ar`/`-c:a`/geometry/`-map`); from Python,
+  (`-ac`/`-c:a`/geometry/`-map`); from Python,
   `src.last_error()` returns the same message ("" means clean EOF).

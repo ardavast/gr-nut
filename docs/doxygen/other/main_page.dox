@@ -1,10 +1,21 @@
-/*! \mainpage
+/*! \mainpage gr-nut
 
-Welcome to the GNU Radio NUT Block
+A single, reusable interface between ffmpeg and GNU Radio for analogue
+transmission chains: ffmpeg is the codec/format/sync layer, GNU Radio is
+the physical layer, and a NUT stream over a pipe/FIFO is the socket
+between them.
 
-This is the intro page for the Doxygen manual generated for the NUT
-block (docs/doxygen/other/main_page.dox). Edit it to add more detailed
-documentation about the new GNU Radio modules contained in this
-project.
+The module contains one block, gr::nut::nut_source. It ingests a
+strict-profile NUT stream (pcm_f32le audio + rawvideo/rgb24 video) and
+emits deinterleaved float audio (one port per channel) and rgb24 video
+byte streams (one port per stream). The audio sample rate and per-stream
+video geometry are adopted from the NUT stream headers at start; the
+structure (stream kinds, codecs, channel count) is validated and any
+mismatch is a hard error. The flowgraph sink is the only clock — ffmpeg
+is paced purely by pipe backpressure.
+
+See the repository README.md for the interface contract, clocking model
+and error model, and docs/buffering.md for the buffering and
+synchronization reference.
 
 */

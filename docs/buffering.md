@@ -34,6 +34,11 @@ what makes buffering here more than a performance knob — see §4.
 
 ## 2. Clocking
 
+(The chain-level rules — which configurations are supported, how many
+clocks a chain may contain, how two-clock chains fail — are in
+[clocking.md](clocking.md). This section states only what the deadlock
+and drift math below depends on.)
+
 The flowgraph sink (SDR, audio device) is the **only clock** in the whole
 chain. There is no Throttle block, and ffmpeg runs without `-re`: it is
 paced purely by pipe backpressure — when GR is not consuming, ffmpeg's
@@ -174,5 +179,7 @@ contract (§5's inequality has a term on each side of the pipe).
 | Mid-stream contract change (geometry/layout) | same as startup failure, at the point of detection |
 | Rate-defective source (VFR video, lying sample rate, gaps) not repaired in ffmpeg | one path's buffer pins full while the sink underruns or skew accumulates — the block will not adapt by design. The fix belongs in the ffmpeg command: `-fps_mode cfr` and `aresample=async=1` run the same drop/dup/stretch logic a media player would run at play time, at mux time instead, because a transmit sample clock cannot bend |
 
-*(See `gr-nut-design.md` for the full design rationale; this document is
-the user-facing distillation of its §2, §4.6 and §4.7.)*
+*(This document, together with [contract.md](contract.md), is the
+complete reference for the module's behavior; the QA tests in
+`python/nut/qa_nut_source.py` exercise every failure mode in the table
+above.)*
