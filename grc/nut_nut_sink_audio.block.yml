@@ -1,0 +1,97 @@
+id: nut_nut_sink_audio
+label: NUT Audio Sink
+category: '[NUT]'
+
+templates:
+  imports: from gnuradio import nut
+  make: nut.nut_sink(${uri}, ${audio_channels}, ${audio_rate}, 0, [], [], [], ${command}, ${flush_timeout})
+
+parameters:
+- id: command
+  label: Spawn Command
+  dtype: string
+  default: 'ffmpeg -y -loglevel warning -i pipe:0 /tmp/recording.flac'
+- id: uri
+  label: NUT File
+  dtype: string
+  default: ''
+  hide: part
+- id: audio_channels
+  label: Audio Channels
+  dtype: int
+  default: '1'
+- id: audio_rate
+  label: Audio Rate (Hz)
+  dtype: int
+  default: '48000'
+- id: flush_timeout
+  label: Flush Timeout (s)
+  dtype: real
+  default: '10.0'
+  hide: part
+
+inputs:
+- label: audio
+  domain: stream
+  dtype: float
+  multiplicity: ${audio_channels}
+
+asserts:
+- ${(command != '') != (uri != '')}
+- ${audio_channels >= 1}
+- ${audio_rate > 0}
+- ${flush_timeout >= 0}
+
+documentation: |-
+  Audio-only instance of nut.nut_sink — the reverse of the NUT sources:
+  interleaves the float inputs (one port per channel) into one pcm_f32le
+  stream, muxes it into a raw-payload NUT stream and feeds it to ffmpeg
+  for encoding, recording, or streaming. Same C++ block as "NUT Video
+  Sink" and "NUT A/V Sink" — the three GRC entries only differ in the
+  declared stream layout.
+
+  Where the sources ADOPT the format from the stream headers, the sink
+  DECLARES it: this block writes the headers, so Audio Rate is a
+  parameter (the single source of truth), and timestamps are synthesized
+  from the sample count — exact by construction. The flip side: the
+  flowgraph feeding this block must actually produce samples at the
+  declared rate (exact rational resampler ratios; see the clock rules in
+  docs/clocking.md). If the upstream is an SDR source, receiver overflows
+  silently compress the recorded timeline — the block warns when it sees
+  rx_time tags mid-stream but cannot repair the loss.
+
+  Two plumbing modes (exactly one of Spawn Command / NUT File must be
+  set):
+  * Spawn Command (the default mode, POSIX only): a full shell command;
+    the block runs it via /bin/sh -c and feeds NUT to its STDIN. No
+    -ar/-ac input flags are needed — the NUT headers carry the format.
+    The default command records to /tmp/recording.flac; anything goes
+    (encoders, filters, pipelines, icecast/RTP pushes) as long as it
+    reads NUT on stdin, e.g.:
+      ffmpeg -y -loglevel warning -i pipe:0 -c:a libopus out.opus
+  * NUT File (properties dialog): the NUT stream is written to the
+    FIFO/file named here; an externally started ffmpeg reads it
+    ("ffmpeg -i FIFO ..."). For a FIFO, the flowgraph waits at start
+    until the reader appears.
+
+  Shutdown: on stop the block flushes the muxer, writes the NUT trailer,
+  closes the pipe (the reader's EOF), then WAITS for a spawned command to
+  exit on its own — the encoder finalizing its file is the desired end;
+  only after Flush Timeout seconds does it escalate to SIGTERM/SIGKILL.
+  A reader that dies mid-stream (EPIPE) is an ERROR (the recording is
+  lost), reported via last_error(), not a normal end.
+
+  Clocking: at most one pacer in the whole chain (docs/clocking.md,
+  K-cases). Recording an SDR RX chain to a file: the SDR paces, ffmpeg
+  must keep up on average (K1). A pure generator chain to a file
+  free-runs faster than real time (K0) — that is fine. No Throttle
+  blocks; a file-writing ffmpeg needs no pacing flags.
+
+  Skew and buffering: the block consumes greedily from whichever input
+  has data; libavformat's interleave queue reorders by time and bounds
+  its memory (1 s of media), so uneven production can never deadlock the
+  flowgraph. Note that GNU Radio ends a sink when its FIRST input ends —
+  end all channels together for a complete recording (backlog already
+  delivered on the other ports is still salvaged into the file).
+
+file_format: 1

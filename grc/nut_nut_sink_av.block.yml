@@ -1,0 +1,126 @@
+id: nut_nut_sink_av
+label: NUT A/V Sink
+category: '[NUT]'
+
+templates:
+  imports: from gnuradio import nut
+  make: nut.nut_sink(${uri}, ${audio_channels}, ${audio_rate}, ${video_streams}, ${widths}, ${heights}, [str(x) for x in ${fps}], ${command}, ${flush_timeout})
+
+parameters:
+- id: command
+  label: Spawn Command
+  dtype: string
+  default: 'ffmpeg -y -loglevel warning -i pipe:0 -c:v libx264 -preset veryfast -c:a flac /tmp/recording.mkv'
+- id: uri
+  label: NUT File
+  dtype: string
+  default: ''
+  hide: part
+- id: audio_channels
+  label: Audio Channels
+  dtype: int
+  default: '1'
+- id: audio_rate
+  label: Audio Rate (Hz)
+  dtype: int
+  default: '48000'
+- id: video_streams
+  label: Video Streams
+  dtype: int
+  default: '1'
+- id: widths
+  label: Frame Widths
+  dtype: int_vector
+  default: '[640]'
+- id: heights
+  label: Frame Heights
+  dtype: int_vector
+  default: '[480]'
+- id: fps
+  label: Frame Rates
+  dtype: raw
+  default: '[25]'
+- id: flush_timeout
+  label: Flush Timeout (s)
+  dtype: real
+  default: '10.0'
+  hide: part
+
+inputs:
+- label: audio
+  domain: stream
+  dtype: float
+  multiplicity: ${audio_channels}
+- label: video
+  domain: stream
+  dtype: byte
+  multiplicity: ${video_streams}
+
+asserts:
+- ${(command != '') != (uri != '')}
+- ${audio_channels >= 1}
+- ${audio_rate > 0}
+- ${video_streams >= 1}
+- ${len(widths) in (1, video_streams)}
+- ${len(heights) in (1, video_streams)}
+- ${len(fps) in (1, video_streams)}
+- ${flush_timeout >= 0}
+
+documentation: |-
+  Audio + video instance of nut.nut_sink — the reverse of the NUT
+  sources: interleaves the float inputs into one pcm_f32le stream with
+  Audio Channels channels, cuts each byte input into Width x Height x
+  3-byte rgb24 frames, muxes everything into a raw-payload NUT stream
+  and feeds it to ffmpeg for encoding, recording, or streaming. Same C++
+  block as "NUT Audio Sink" and "NUT Video Sink" — the three GRC entries
+  only differ in the declared stream layout.
+
+  Where the sources ADOPT the format from the stream headers, the sink
+  DECLARES it: this block writes the headers, so Audio Rate and Frame
+  Widths/Heights/Rates are parameters (the single source of truth), and
+  timestamps are synthesized from sample/frame counts — exact by
+  construction. The flowgraph feeding this block must actually produce
+  at the declared rates (exact rational resampler ratios; see
+  docs/clocking.md). With one clock and exact ratios, A/V sync in the
+  file is exact by construction too. If the upstream is an SDR source,
+  receiver overflows silently compress the recorded timeline — the block
+  warns on mid-stream rx_time tags but cannot repair the loss.
+
+  Per-video-stream parameters: Widths/Heights are integer vectors and
+  Frame Rates a list, each of length Video Streams — or of length 1 to
+  apply to every stream. A frame rate is an integer (25) or an exact
+  rational as a string ("30000/1001"); decimals are rejected: 29.97 is
+  not exact; use "30000/1001".
+
+  Two plumbing modes (exactly one of Spawn Command / NUT File must be
+  set):
+  * Spawn Command (the default mode, POSIX only): a full shell command;
+    the block runs it via /bin/sh -c and feeds NUT to its STDIN. No
+    -ar/-video_size/-framerate input flags are needed — the NUT headers
+    carry the format. The default command encodes H.264 + FLAC into
+    /tmp/recording.mkv; anything goes as long as it reads NUT on stdin,
+    e.g. a streaming push:
+      ffmpeg -i pipe:0 -c:v libx264 -preset veryfast -c:a aac \
+        -f flv rtmp://server/live/key
+  * NUT File (properties dialog): the NUT stream is written to the
+    FIFO/file named here; an externally started ffmpeg reads it.
+
+  Shutdown: on stop the block flushes the muxer, writes the NUT trailer,
+  closes the pipe (the reader's EOF), then WAITS for a spawned command
+  to exit on its own — the encoder finalizing its file is the desired
+  end; only after Flush Timeout seconds does it escalate to
+  SIGTERM/SIGKILL. A reader that dies mid-stream (EPIPE) is an ERROR
+  (the recording is lost), reported via last_error().
+
+  Skew: the block consumes greedily from whichever input has data;
+  libavformat's interleave queue reorders by time and bounds its memory
+  (1 s of media), so audio running ahead of video (or vice versa) can
+  never deadlock the flowgraph. GNU Radio ends a sink when its FIRST
+  input ends — end all streams together for a complete recording
+  (backlog already delivered on the other ports is still salvaged).
+
+  Clocking: at most one pacer in the whole chain (docs/clocking.md,
+  K-cases: SDR RX -> file is K1, generator -> file free-runs as K0). No
+  Throttle blocks; a file-writing ffmpeg needs no pacing flags.
+
+file_format: 1

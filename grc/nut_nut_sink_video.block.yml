@@ -1,0 +1,103 @@
+id: nut_nut_sink_video
+label: NUT Video Sink
+category: '[NUT]'
+
+templates:
+  imports: from gnuradio import nut
+  make: nut.nut_sink(${uri}, 0, 0, ${video_streams}, ${widths}, ${heights}, [str(x) for x in ${fps}], ${command}, ${flush_timeout})
+
+parameters:
+- id: command
+  label: Spawn Command
+  dtype: string
+  default: 'ffmpeg -y -loglevel warning -i pipe:0 -c:v libx264 -preset veryfast /tmp/recording.mkv'
+- id: uri
+  label: NUT File
+  dtype: string
+  default: ''
+  hide: part
+- id: video_streams
+  label: Video Streams
+  dtype: int
+  default: '1'
+- id: widths
+  label: Frame Widths
+  dtype: int_vector
+  default: '[640]'
+- id: heights
+  label: Frame Heights
+  dtype: int_vector
+  default: '[480]'
+- id: fps
+  label: Frame Rates
+  dtype: raw
+  default: '[25]'
+- id: flush_timeout
+  label: Flush Timeout (s)
+  dtype: real
+  default: '10.0'
+  hide: part
+
+inputs:
+- label: video
+  domain: stream
+  dtype: byte
+  multiplicity: ${video_streams}
+
+asserts:
+- ${(command != '') != (uri != '')}
+- ${video_streams >= 1}
+- ${len(widths) in (1, video_streams)}
+- ${len(heights) in (1, video_streams)}
+- ${len(fps) in (1, video_streams)}
+- ${flush_timeout >= 0}
+
+documentation: |-
+  Video-only instance of nut.nut_sink — the reverse of the NUT sources:
+  cuts each byte input into Width x Height x 3-byte rgb24 frames (partial
+  frames are staged internally), muxes them into a raw-payload NUT stream
+  and feeds it to ffmpeg for encoding, recording, or streaming. Same C++
+  block as "NUT Audio Sink" and "NUT A/V Sink" — the three GRC entries
+  only differ in the declared stream layout.
+
+  Where the sources ADOPT the format from the stream headers, the sink
+  DECLARES it: this block writes the headers, so Frame Widths / Heights /
+  Rates are parameters (the single source of truth), and timestamps are
+  synthesized from the frame count — exact by construction. The flowgraph
+  feeding this block must actually produce frames at the declared rate.
+
+  Per-stream parameters: Widths/Heights are integer vectors and Frame
+  Rates a list, each of length Video Streams — or of length 1 to apply
+  to every stream. A frame rate is an integer (25) or an exact rational
+  as a string ("30000/1001"); fractions.Fraction works too. Decimals are
+  rejected: 29.97 is not exact; use "30000/1001".
+
+  Two plumbing modes (exactly one of Spawn Command / NUT File must be
+  set):
+  * Spawn Command (the default mode, POSIX only): a full shell command;
+    the block runs it via /bin/sh -c and feeds NUT to its STDIN. No
+    -video_size/-framerate input flags are needed — the NUT headers
+    carry the format. The default command encodes to H.264 in
+    /tmp/recording.mkv; anything goes as long as it reads NUT on stdin.
+  * NUT File (properties dialog): the NUT stream is written to the
+    FIFO/file named here; an externally started ffmpeg reads it.
+
+  Shutdown: on stop the block flushes the muxer, writes the NUT trailer,
+  closes the pipe (the reader's EOF), then WAITS for a spawned command
+  to exit on its own — the encoder finalizing its file is the desired
+  end; only after Flush Timeout seconds does it escalate to
+  SIGTERM/SIGKILL. A reader that dies mid-stream (EPIPE) is an ERROR
+  (the recording is lost), reported via last_error().
+
+  Multiple video streams: set Video Streams = N; port video_i becomes
+  the i-th video stream in NUT stream order, each with its own declared
+  geometry and rate. The interleave queue reorders uneven production
+  (bounded to 1 s of media), so skew between ports can never deadlock
+  the flowgraph. GNU Radio ends a sink when its FIRST input ends — end
+  all streams together for a complete recording.
+
+  Clocking: at most one pacer in the whole chain (docs/clocking.md,
+  K-cases). No Throttle blocks; a file-writing ffmpeg needs no pacing
+  flags.
+
+file_format: 1
