@@ -4,8 +4,8 @@ Which chain configurations are supported, why, and how the unsupported
 ones fail. The companion document [buffering.md](buffering.md) covers the
 buffer-level mechanics (deadlock, sizing); this one covers the chain-level
 question: **where does time come from, and how many clocks are in play?**
-It applies to `nut_source` today and to the planned reverse block
-(`nut_sink`, GR → ffmpeg) symmetrically.
+It applies to `nut_source` and to the reverse block (`nut_sink`,
+GR → ffmpeg) symmetrically.
 
 ## 1. The rule: count the clocks
 
@@ -81,7 +81,7 @@ Source chains (ffmpeg → pipe → flowgraph):
 | S2 | live capture, RTSP | file / processing | 1 | capture paces ffmpeg; the pipe paces GR |
 | S3 | live capture, RTSP | SDR TX, audio sink | 2 | **out of contract** (§5) |
 
-Sink chains (flowgraph → pipe → ffmpeg; `nut_sink`, planned):
+Sink chains (flowgraph → pipe → ffmpeg; `nut_sink`):
 
 | # | flowgraph end | ffmpeg output | clocks | verdict |
 |---|---------------|---------------|--------|---------|

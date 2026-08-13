@@ -6,6 +6,12 @@ buffers default to the sizes they do, and what to do when the defaults
 don't fit. Nothing here is required reading to *use* the block; it is
 required reading before *changing* any buffer size or pacing behavior.
 
+(`nut_sink` needs no counterpart to this document: its anti-deadlock
+cushion is not GR buffer sizing but libavformat's interleave queue —
+the sink consumes greedily from whichever input has data and the queue
+reorders, bounded by `max_interleave_delta`. See the sink section of
+[contract.md](contract.md).)
+
 ## 1. The topology
 
 ```

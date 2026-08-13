@@ -1,11 +1,14 @@
 # The interface contract
 
-This is the normative description of what `nut_source` expects on its
-input and what it emits on its ports. The ffmpeg command is the single
-source of truth for the stream format; the block validates the
-*structure* and adopts the rest. For the clock model (which chain
-configurations are supported) see [clocking.md](clocking.md); for
-buffering and deadlock mechanics see [buffering.md](buffering.md).
+This is the normative description of the module's two blocks: what
+`nut_source` expects on its input and emits on its ports, and what
+`nut_sink` consumes and writes. Both speak the same strict NUT profile;
+they differ in the *direction of truth* — the source adopts the format
+from the stream headers (the ffmpeg command is the single source of
+truth), the sink declares it via parameters (the block writes the
+headers). For the clock model (which chain configurations are supported)
+see [clocking.md](clocking.md); for buffering and deadlock mechanics see
+[buffering.md](buffering.md).
 
 ## The NUT profile
 
@@ -135,3 +138,108 @@ is EOF plus a logged warning, with the spawned command's exit status
 logged distinctly. A contract mismatch or failing command produces an
 ERROR log that says exactly which ffmpeg option to fix
 (`-ac`/`-c:a`/geometry/`-map`).
+
+## The sink: `nut_sink`
+
+The reverse block — the flowgraph produces float audio and rgb24 video
+byte streams, `nut_sink` muxes them into the same strict NUT profile and
+feeds ffmpeg for encoding, recording, or streaming. Same profile, same
+`uri`-XOR-`command` plumbing, same error model; the direction of truth
+flips.
+
+### Declared, not adopted
+
+The sink writes the NUT headers, so the format is **declared via
+parameters** — `audio_rate`, and per video stream `widths`, `heights`,
+`fps` (each vector of length `video_streams`, or of length 1 to apply to
+every stream; anything else is a constructor error). `fps` entries are
+strings: an integer (`"25"`) or an exact rational (`"30000/1001"`);
+through the thin Python wrapper, bare integers and `fractions.Fraction`s
+work too. **Decimal spellings are rejected** with the exact rational
+named in the error — 29.97 ≠ 30000/1001, and the rational discipline
+([clocking.md](clocking.md) §2) forbids the approximation.
+
+Inputs mirror the source's outputs: one float port per audio channel
+(the block interleaves them into ONE `pcm_f32le` stream), one byte port
+per video stream (each cut into W×H×3-byte frames; partial frames are
+staged across calls, and a trailing fragment at shutdown is dropped with
+a warning — it usually means a producer bug).
+
+### Synthesized timestamps
+
+pts are synthesized from per-stream sample/frame counters (`pts` =
+emitted count in the stream timebase) — exact by construction, and
+therefore **blind**: the rational-ratio duty sits *upstream* of the
+block. A flowgraph whose actual rate differs from the declared one
+yields an internally-consistent-but-wrong file, invisible in-band. The
+sharpest case is an SDR receiver overflow: the samples are gone, the
+counter never knows, and the recorded timeline silently compresses. The
+block WARNs (once per port) when it sees an overflow-indicating tag
+(`rx_time` beyond offset 0) on an input, but it cannot repair the loss —
+fix the overflow upstream.
+
+### Consumption, interleave, end of stream
+
+The block consumes **greedily** from whichever input has data and hands
+packets to libavformat's interleave queue, which reorders by time and
+bounds its memory (`max_interleave_delta`, set by the block to 1 s —
+the mirror of the source-side advice to always pass it to ffmpeg).
+Verified behavior: the queue never blocks and never errors on skew; it
+force-flushes beyond the bound, so uneven production degrades the
+interleaving of the output file, never the flowgraph.
+
+End of stream follows GNU Radio's sink semantics: **the recording ends
+when the first input ends** (the scheduler declares a sink done at its
+first exhausted input — think ffmpeg `-shortest`). Backlog already
+delivered on the other inputs is salvaged into the file during shutdown,
+but an upstream block still producing at that moment may be cut short —
+end all streams at the same media time for a byte-complete multi-stream
+recording. Recorders stopped by `tb.stop()`/Ctrl-C are unaffected: the
+salvage drains everything the flowgraph delivered.
+
+### Plumbing
+
+Exactly one of `uri` / `command`:
+
+- **External mode** (`uri`): the NUT stream is written to the FIFO or
+  file named by `uri`; the reader is launched externally. For a FIFO,
+  `start()` waits for the reader to appear.
+- **Spawn mode** (`command`, POSIX-only): the block runs the command via
+  `/bin/sh -c` and feeds NUT to the child's **stdin** over an anonymous
+  pipe; stdout/stderr are inherited, and the child runs in its own
+  process group. The command reads NUT from stdin — no `-ar`/`-s`/`-r`
+  input flags are needed, our headers carry the format:
+
+  ```sh
+  # record to flac
+  ffmpeg -y -loglevel warning -i pipe:0 recording.flac
+
+  # encode A/V to mkv
+  ffmpeg -y -loglevel warning -i pipe:0 -c:v libx264 -preset veryfast \
+    -c:a flac recording.mkv
+
+  # push a stream
+  ffmpeg -loglevel warning -i pipe:0 -c:v libx264 -preset veryfast \
+    -c:a aac -f flv rtmp://server/live/key
+  ```
+
+### Shutdown and the error model
+
+Shutdown runs the source's ordering in reverse, with the polarity
+flipped: **flush the interleave queue → write the NUT trailer → close
+the pipe/FIFO (the reader's EOF) → wait for a spawned child to exit on
+its own** — the child finishing (encoder flushed, container finalized)
+is the *desired* end state; killing it early corrupts the recording.
+Only after `flush_timeout` seconds (a hidden parameter, default 10)
+does the block escalate to SIGTERM, then SIGKILL, of the process group.
+In external mode the same flush ordering applies and the FIFO close
+delivers the EOF; there is no child to wait for.
+
+The child-death polarity flips too: where a dead *writer* is the
+source's normal EOF, a dead *reader* (EPIPE on write) is an **error** —
+the recording or stream was lost. Same `fail()` latch, ERROR log, clean
+flowgraph termination, and `last_error()` post-mortem as the source
+(SIGPIPE is blocked in the write path; pure-C++ GR hosts do not ignore
+it the way Python does). Constructor misuse — both/neither of
+`uri`/`command`, bad vector lengths, a rejected fps spelling, audio
+declared without a rate — still raises in the calling thread.

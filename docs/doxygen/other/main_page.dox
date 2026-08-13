@@ -5,14 +5,18 @@ transmission chains: ffmpeg is the codec/format/sync layer, GNU Radio is
 the physical layer, and a NUT stream over a pipe/FIFO is the socket
 between them.
 
-The module contains one block, gr::nut::nut_source. It ingests a
-strict-profile NUT stream (pcm_f32le audio + rawvideo/rgb24 video) and
-emits deinterleaved float audio (one port per channel) and rgb24 video
-byte streams (one port per stream). The audio sample rate and per-stream
-video geometry are adopted from the NUT stream headers at start; the
-structure (stream kinds, codecs, channel count) is validated and any
-mismatch is a hard error. The flowgraph sink is the only clock — ffmpeg
-is paced purely by pipe backpressure.
+The module contains two blocks, one per direction. gr::nut::nut_source
+ingests a strict-profile NUT stream (pcm_f32le audio + rawvideo/rgb24
+video) and emits deinterleaved float audio (one port per channel) and
+rgb24 video byte streams (one port per stream); the audio sample rate
+and per-stream video geometry are adopted from the NUT stream headers at
+start, the structure (stream kinds, codecs, channel count) is validated
+and any mismatch is a hard error. gr::nut::nut_sink is the reverse: it
+consumes float audio and rgb24 byte streams, muxes them into the same
+profile with timestamps synthesized from sample/frame counts (the format
+is declared via parameters — the sink writes the headers), and feeds
+ffmpeg for encoding, recording, or streaming. In every chain there is at
+most one clock — ffmpeg is paced purely by pipe backpressure.
 
 See the repository README.md for the interface contract, clocking model
 and error model, and docs/buffering.md for the buffering and
