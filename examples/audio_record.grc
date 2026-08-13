@@ -1,0 +1,186 @@
+options:
+  parameters:
+    author: gr-nut
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    comment: ''
+    copyright: ''
+    description: 'nut_sink M1 example: signal generator -> NUT Audio Sink with the
+      default spawn command (ffmpeg records /tmp/recording.flac from NUT on its
+      stdin). A K0 chain: no pacer anywhere, so the graph free-runs faster than
+      real time and renders `seconds` seconds of tone in a fraction of that. On
+      completion the sink flushes the muxer, writes the trailer, closes the pipe
+      and WAITS for ffmpeg to finalize the file — the child exiting on its own
+      is the normal end. External-mode variant: pass --command "" --uri FIFO and
+      run your own ffmpeg -i FIFO ... on it.'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: audio_record
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: run
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: gr-nut audio recording example
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: command
+  id: parameter
+  parameters:
+    alias: ''
+    comment: 'spawn mode: full shell command
+
+      reading NUT on stdin, e.g.
+
+      ffmpeg -y -loglevel warning -i pipe:0 out.flac'
+    hide: none
+    label: Spawn Command (spawn mode)
+    short_id: ''
+    type: str
+    value: ffmpeg -y -loglevel warning -i pipe:0 /tmp/recording.flac
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [232, 8]
+    rotation: 0
+    state: enabled
+- name: uri
+  id: parameter
+  parameters:
+    alias: ''
+    comment: 'external mode: FIFO/file
+
+      read by your own ffmpeg'
+    hide: none
+    label: NUT FIFO/file (external mode)
+    short_id: ''
+    type: str
+    value: ''
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [472, 8]
+    rotation: 0
+    state: enabled
+- name: seconds
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: Seconds to record
+    short_id: ''
+    type: eng_float
+    value: '10'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [632, 8]
+    rotation: 0
+    state: enabled
+- name: rate
+  id: variable
+  parameters:
+    comment: 'declared to the sink: it writes
+
+      the NUT headers (rate is not adopted)'
+    value: '48000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [792, 8]
+    rotation: 0
+    state: enabled
+- name: analog_sig_source_x_0
+  id: analog_sig_source_x
+  parameters:
+    affinity: ''
+    alias: ''
+    amp: '0.5'
+    comment: 'the media source: a 440 Hz tone
+
+      at the declared 48 kHz'
+    freq: '440'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    offset: '0'
+    phase: '0'
+    samp_rate: rate
+    showports: 'False'
+    type: float
+    waveform: analog.GR_COS_WAVE
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 172]
+    rotation: 0
+    state: enabled
+- name: blocks_head_0
+  id: blocks_head
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'bounds the recording; without a
+
+      pacer the graph free-runs (K0)'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    num_items: int(seconds * rate)
+    type: float
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [256, 188]
+    rotation: 0
+    state: enabled
+- name: nut_nut_sink_audio_0
+  id: nut_nut_sink_audio
+  parameters:
+    affinity: ''
+    alias: ''
+    audio_channels: '1'
+    audio_rate: rate
+    command: command
+    comment: 'set exactly one of command/uri;
+
+      flush -> trailer -> EOF -> wait for
+
+      ffmpeg to finalize the file'
+    flush_timeout: '10.0'
+    uri: uri
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [440, 180]
+    rotation: 0
+    state: enabled
+
+connections:
+- [analog_sig_source_x_0, '0', blocks_head_0, '0']
+- [blocks_head_0, '0', nut_nut_sink_audio_0, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

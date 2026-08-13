@@ -1,8 +1,9 @@
 # gr-nut examples
 
-Two example flowgraphs: a mono FM transmitter (the first real
-transmission chain) and a file-based video-path check. The interface
-contract and the ffmpeg command shapes they rely on are documented in
+Example flowgraphs for both directions: a mono FM transmitter and a
+file-based video-path check for `nut_source`, and an audio recorder plus
+a full-circle round-trip check for `nut_sink`. The interface contract
+and the ffmpeg command shapes they rely on are documented in
 [docs/contract.md](../docs/contract.md); the buffering/clocking model in
 [docs/buffering.md](../docs/buffering.md).
 
@@ -60,6 +61,48 @@ directly with ffmpeg and compares bit for bit:
 ./video_check.sh 320 240 25 2
 # -> OK: 50 frames of 320x240 rgb24, byte-exact
 ```
+
+## Audio recording (`audio_record.grc` / `.py`)
+
+The sink-side mirror of the FM transmitter's ingest: signal generator →
+**NUT Audio Sink** with its default spawn command — the block feeds NUT
+to a spawned `ffmpeg -y -loglevel warning -i pipe:0 /tmp/recording.flac`
+on its stdin. A K0 chain (no pacer anywhere): the graph free-runs faster
+than real time and renders the tone in a fraction of its duration.
+
+```sh
+python3 audio_record.py --seconds 10
+ffprobe /tmp/recording.flac   # -> flac, 48000 Hz, mono, 10.0 s
+```
+
+The interesting part is the ending: when the `head` block runs out, the
+sink flushes the muxer, writes the NUT trailer, closes the pipe (ffmpeg's
+EOF) and *waits* for ffmpeg to finalize the file — the child exiting on
+its own is the normal end of a recording; it is only killed after the
+flush timeout. External-mode variant: pass `--command "" --uri FIFO` and
+run your own `ffmpeg -i FIFO ...` against it.
+
+## Round-trip validation (`roundtrip_check.sh`)
+
+The sink counterpart of `video_check.sh`, unattended: known vectors →
+`nut_sink` → file → `nut_source` → vector sinks, compared byte for byte
+(three legs: full-size audio, full-size video, and a joint A/V leg),
+plus ffprobe checks of the written headers and per-packet video
+durations. The sink and the source share no code paths, so a green run
+certifies both directions of the contract at once:
+
+```sh
+./roundtrip_check.sh 320 240 25 2
+# -> OK: audio 96000 samples @ 48000 Hz round-tripped sample-exact
+# -> OK: video 50 frames of 320x240 rgb24 round-tripped byte-exact
+# -> OK: joint A/V (11520 samples + 6 frames of 64x48) round-tripped, ...
+```
+
+(The joint leg is deliberately small: GNU Radio ends a sink when its
+*first* input is exhausted, so a finite multi-input flowgraph is only
+byte-complete when every stream's payload fits its input buffer — see
+the comment in the script. Real recorders stop via Ctrl-C/`tb.stop()`,
+not by exhausting finite vectors.)
 
 ## Notes
 
