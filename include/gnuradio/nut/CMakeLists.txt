@@ -10,4 +10,5 @@
 # Install public header files
 ########################################################################
 install(FILES api.h
-    nut_source.h DESTINATION include/gnuradio/nut)
+    nut_source.h
+    nut_sink.h DESTINATION include/gnuradio/nut)

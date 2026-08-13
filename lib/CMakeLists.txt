@@ -12,7 +12,8 @@
 include(GrPlatform) #define LIB_SUFFIX
 
 list(APPEND nut_sources
-    nut_source_impl.cc)
+    nut_source_impl.cc
+    nut_sink_impl.cc)
 
 set(nut_sources
     "${nut_sources}"

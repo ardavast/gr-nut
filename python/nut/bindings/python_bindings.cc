@@ -22,6 +22,7 @@ namespace py = pybind11;
 /**************************************/
 // BINDING_FUNCTION_PROTOTYPES(
     void bind_nut_source(py::module& m);
+    void bind_nut_sink(py::module& m);
 // ) END BINDING_FUNCTION_PROTOTYPES
 
 
@@ -51,5 +52,6 @@ PYBIND11_MODULE(nut_python, m)
     /**************************************/
     // BINDING_FUNCTION_CALLS(
     bind_nut_source(m);
+    bind_nut_sink(m);
     // ) END BINDING_FUNCTION_CALLS
 }

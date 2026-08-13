@@ -25,7 +25,8 @@ include(GrPybind)
 ########################################################################
 
 list(APPEND nut_python_files
-    nut_source_python.cc python_bindings.cc)
+    nut_source_python.cc
+    nut_sink_python.cc python_bindings.cc)
 
 gr_pybind_make_oot(nut ../../.. gr::nut "${nut_python_files}")
 
