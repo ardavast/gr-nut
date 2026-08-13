@@ -1,0 +1,231 @@
+options:
+  parameters:
+    author: gr-nut
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    comment: ''
+    copyright: ''
+    description: 'nut_sink video example: a vector source holding one frame of
+      eight vertical color bars (white/yellow/cyan/green/magenta/red/blue/black,
+      rgb24, row-major) repeats it into the NUT Video Sink, which cuts the byte
+      stream into frames, stamps pts from the frame count and feeds a spawned
+      ffmpeg encoding H.264 to /tmp/bars.mkv. A K0 chain: no pacer anywhere, the
+      graph free-runs and renders `seconds` seconds of video in a fraction of
+      that. Play the result with any video player.'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: video_bars
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: run
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: gr-nut video bars example
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: command
+  id: parameter
+  parameters:
+    alias: ''
+    comment: 'spawn mode: full shell command
+
+      reading NUT on stdin'
+    hide: none
+    label: Spawn Command (spawn mode)
+    short_id: ''
+    type: str
+    value: ffmpeg -y -loglevel warning -i pipe:0 -c:v libx264 -preset veryfast -pix_fmt
+      yuv420p /tmp/bars.mkv
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 8]
+    rotation: 0
+    state: enabled
+- name: uri
+  id: parameter
+  parameters:
+    alias: ''
+    comment: 'external mode: FIFO/file
+
+      read by your own ffmpeg'
+    hide: none
+    label: NUT FIFO/file (external mode)
+    short_id: ''
+    type: str
+    value: ''
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [440, 8]
+    rotation: 0
+    state: enabled
+- name: seconds
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: Seconds of video
+    short_id: ''
+    type: eng_float
+    value: '5'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [600, 8]
+    rotation: 0
+    state: enabled
+- name: width
+  id: variable
+  parameters:
+    comment: 'declared to the sink: it writes the
+
+      NUT headers and cuts frames at
+
+      width*height*3 bytes'
+    value: '320'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [760, 8]
+    rotation: 0
+    state: enabled
+- name: height
+  id: variable
+  parameters:
+    comment: ''
+    value: '240'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [856, 8]
+    rotation: 0
+    state: enabled
+- name: fps
+  id: variable
+  parameters:
+    comment: ''
+    value: '25'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [952, 8]
+    rotation: 0
+    state: enabled
+- name: bars
+  id: variable
+  parameters:
+    comment: 'one rgb24 frame, row-major: eight
+
+      vertical bars, pixel x takes color
+
+      x*8//width'
+    value: '[c for y in range(height) for x in range(width) for c in [(255, 255,
+      255), (255, 255, 0), (0, 255, 255), (0, 255, 0), (255, 0, 255), (255, 0, 0),
+      (0, 0, 255), (0, 0, 0)][x * 8 // width]]'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 92]
+    rotation: 0
+    state: enabled
+- name: blocks_vector_source_x_0
+  id: blocks_vector_source_x
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'the media source: one frame of
+
+      bars, repeated forever'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    repeat: 'True'
+    tags: '[]'
+    type: byte
+    vector: bars
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 204]
+    rotation: 0
+    state: enabled
+- name: blocks_head_0
+  id: blocks_head
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: 'bounds the recording to whole
+
+      frames; without a pacer the
+
+      graph free-runs (K0)'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    num_items: int(seconds * fps) * width * height * 3
+    type: byte
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [256, 220]
+    rotation: 0
+    state: enabled
+- name: nut_nut_sink_video_0
+  id: nut_nut_sink_video
+  parameters:
+    affinity: ''
+    alias: ''
+    command: command
+    comment: 'declares 320x240@25, writes the
+
+      headers, synthesizes pts from the
+
+      frame count; on stop: flush ->
+
+      trailer -> EOF -> wait for ffmpeg'
+    flush_timeout: '10.0'
+    fps: '[fps]'
+    heights: '[height]'
+    uri: uri
+    video_streams: '1'
+    widths: '[width]'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [472, 212]
+    rotation: 0
+    state: enabled
+
+connections:
+- [blocks_vector_source_x_0, '0', blocks_head_0, '0']
+- [blocks_head_0, '0', nut_nut_sink_video_0, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.9.2

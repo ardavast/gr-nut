@@ -82,6 +82,26 @@ its own is the normal end of a recording; it is only killed after the
 flush timeout. External-mode variant: pass `--command "" --uri FIFO` and
 run your own `ffmpeg -i FIFO ...` against it.
 
+## Video bars (`video_bars.grc` / `.py`)
+
+The video-side recorder: a vector source holds a single rgb24 frame of
+eight vertical color bars (white, yellow, cyan, green, magenta, red,
+blue, black — pixel `x` takes color `x*8//width`) and repeats it into
+the **NUT Video Sink**, which cuts the byte stream into 320×240 frames,
+stamps pts from the frame count and feeds a spawned ffmpeg encoding
+H.264. Another K0 free-run: seconds of video render in a fraction of a
+second.
+
+```sh
+python3 video_bars.py --seconds 5
+mpv /tmp/bars.mkv          # or any player
+```
+
+This is the simplest possible "GR generates video" demo — the frame is
+built by a one-line list comprehension in a GRC variable, no custom
+blocks. Swap the vector for your own W×H×3 bytes and it records
+anything.
+
 ## Round-trip validation (`roundtrip_check.sh`)
 
 The sink counterpart of `video_check.sh`, unattended: known vectors →
