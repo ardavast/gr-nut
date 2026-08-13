@@ -5,7 +5,7 @@ options:
     category: '[GRC Hier Blocks]'
     comment: ''
     copyright: ''
-    description: 'M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM
+    description: 'mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM
     mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF
     is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn
     mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1
@@ -26,7 +26,7 @@ options:
     run_options: run
     sizing_mode: fixed
     thread_safe_setters: ''
-    title: gr-nut M1 mono FM transmitter
+    title: gr-nut mono FM transmitter
     window_size: (1000,1000)
   states:
     bus_sink: false

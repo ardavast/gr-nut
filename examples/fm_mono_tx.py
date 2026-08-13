@@ -5,9 +5,9 @@
 # SPDX-License-Identifier: GPL-3.0
 #
 # GNU Radio Python Flow Graph
-# Title: gr-nut M1 mono FM transmitter
+# Title: gr-nut mono FM transmitter
 # Author: gr-nut
-# Description: M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1" and the block runs ffmpeg itself. Ops variant: fm_mono_tx.sh starts ffmpeg externally and passes --uri FIFO instead.
+# Description: mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1" and the block runs ffmpeg itself. Ops variant: fm_mono_tx.sh starts ffmpeg externally and passes --uri FIFO instead.
 # GNU Radio version: 3.10.9.2
 
 from gnuradio import analog
@@ -29,7 +29,7 @@ from gnuradio import soapy
 class fm_mono_tx(gr.top_block):
 
     def __init__(self, uri='', command='ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1', freq=99.9e6, vga_gain=40, amp=0):
-        gr.top_block.__init__(self, "gr-nut M1 mono FM transmitter", catch_exceptions=True)
+        gr.top_block.__init__(self, "gr-nut mono FM transmitter", catch_exceptions=True)
 
         ##################################################
         # Parameters
@@ -122,7 +122,7 @@ class fm_mono_tx(gr.top_block):
 
 
 def argument_parser():
-    description = 'M1 mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1" and the block runs ffmpeg itself. Ops variant: fm_mono_tx.sh starts ffmpeg externally and passes --uri FIFO instead.'
+    description = 'mono FM transmitter: NUT ingest -> 48k -> 200k (25/6) -> WBFM mono (+-75 kHz, 50 us preemphasis) -> 200k -> 8M (40/1) -> HackRF. The HackRF is the only clock; ffmpeg is paced by pipe backpressure. No Throttle. Spawn mode showcase: pass --command "ffmpeg -i song.flac -vn -af aresample=48000:async=1 -ac 1 -c:a pcm_f32le -max_interleave_delta 500000 -f nut pipe:1" and the block runs ffmpeg itself. Ops variant: fm_mono_tx.sh starts ffmpeg externally and passes --uri FIFO instead.'
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "--uri", dest="uri", type=str, default='',

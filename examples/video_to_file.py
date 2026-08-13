@@ -5,9 +5,9 @@
 # SPDX-License-Identifier: GPL-3.0
 #
 # GNU Radio Python Flow Graph
-# Title: gr-nut M3 video-to-file dump
+# Title: gr-nut video-to-file dump
 # Author: gr-nut
-# Description: M3 video path validation: NUT video ingest -> raw rgb24 frame dump to a file. No modulator, no display; use video_check.sh to verify the dump byte-exactly against ffmpeg.
+# Description: video path validation: NUT video ingest -> raw rgb24 frame dump to a file. No modulator, no display; use video_check.sh to verify the dump byte-exactly against ffmpeg.
 # GNU Radio version: 3.10.9.2
 
 from gnuradio import blocks
@@ -27,7 +27,7 @@ from gnuradio import nut
 class video_to_file(gr.top_block):
 
     def __init__(self, uri='/tmp/video.nut', outfile='frames.rgb'):
-        gr.top_block.__init__(self, "gr-nut M3 video-to-file dump", catch_exceptions=True)
+        gr.top_block.__init__(self, "gr-nut video-to-file dump", catch_exceptions=True)
 
         ##################################################
         # Parameters
@@ -66,7 +66,7 @@ class video_to_file(gr.top_block):
 
 
 def argument_parser():
-    description = 'M3 video path validation: NUT video ingest -> raw rgb24 frame dump to a file. No modulator, no display; use video_check.sh to verify the dump byte-exactly against ffmpeg.'
+    description = 'video path validation: NUT video ingest -> raw rgb24 frame dump to a file. No modulator, no display; use video_check.sh to verify the dump byte-exactly against ffmpeg.'
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "--uri", dest="uri", type=str, default='/tmp/video.nut',

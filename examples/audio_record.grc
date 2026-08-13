@@ -5,7 +5,7 @@ options:
     category: '[GRC Hier Blocks]'
     comment: ''
     copyright: ''
-    description: 'nut_sink M1 example: signal generator -> NUT Audio Sink with the
+    description: 'nut_sink example: signal generator -> NUT Audio Sink with the
       default spawn command (ffmpeg records /tmp/recording.flac from NUT on its
       stdin). A K0 chain: no pacer anywhere, so the graph free-runs faster than
       real time and renders `seconds` seconds of tone in a fraction of that. On

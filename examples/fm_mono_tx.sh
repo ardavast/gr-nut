@@ -1,5 +1,5 @@
 #!/bin/sh
-# gr-nut M1 example: mono FM transmitter (HackRF) — EXTERNAL-mode variant
+# gr-nut example: mono FM transmitter (HackRF) — EXTERNAL-mode variant
 # (FIFO plumbing, ffmpeg managed by this script; the shape you'd put in a
 # systemd unit). For quick experiments prefer spawn mode:
 #   python3 fm_mono_tx.py --freq 99.9e6 --command \

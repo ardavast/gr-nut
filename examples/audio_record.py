@@ -7,7 +7,7 @@
 # GNU Radio Python Flow Graph
 # Title: gr-nut audio recording example
 # Author: gr-nut
-# Description: nut_sink M1 example: signal generator -> NUT Audio Sink with the default spawn command (ffmpeg records /tmp/recording.flac from NUT on its stdin). A K0 chain: no pacer anywhere, so the graph free-runs faster than real time and renders `seconds` seconds of tone in a fraction of that. On completion the sink flushes the muxer, writes the trailer, closes the pipe and WAITS for ffmpeg to finalize the file — the child exiting on its own is the normal end. External-mode variant: pass --command "" --uri FIFO and run your own ffmpeg -i FIFO ... on it.
+# Description: nut_sink example: signal generator -> NUT Audio Sink with the default spawn command (ffmpeg records /tmp/recording.flac from NUT on its stdin). A K0 chain: no pacer anywhere, so the graph free-runs faster than real time and renders `seconds` seconds of tone in a fraction of that. On completion the sink flushes the muxer, writes the trailer, closes the pipe and WAITS for ffmpeg to finalize the file — the child exiting on its own is the normal end. External-mode variant: pass --command "" --uri FIFO and run your own ffmpeg -i FIFO ... on it.
 # GNU Radio version: 3.10.9.2
 
 from gnuradio import analog
@@ -88,7 +88,7 @@ class audio_record(gr.top_block):
 
 
 def argument_parser():
-    description = 'nut_sink M1 example: signal generator -> NUT Audio Sink with the default spawn command (ffmpeg records /tmp/recording.flac from NUT on its stdin). A K0 chain: no pacer anywhere, so the graph free-runs faster than real time and renders `seconds` seconds of tone in a fraction of that. On completion the sink flushes the muxer, writes the trailer, closes the pipe and WAITS for ffmpeg to finalize the file — the child exiting on its own is the normal end. External-mode variant: pass --command "" --uri FIFO and run your own ffmpeg -i FIFO ... on it.'
+    description = 'nut_sink example: signal generator -> NUT Audio Sink with the default spawn command (ffmpeg records /tmp/recording.flac from NUT on its stdin). A K0 chain: no pacer anywhere, so the graph free-runs faster than real time and renders `seconds` seconds of tone in a fraction of that. On completion the sink flushes the muxer, writes the trailer, closes the pipe and WAITS for ffmpeg to finalize the file — the child exiting on its own is the normal end. External-mode variant: pass --command "" --uri FIFO and run your own ffmpeg -i FIFO ... on it.'
     parser = ArgumentParser(description=description)
     parser.add_argument(
         "--command", dest="command", type=str, default='ffmpeg -y -loglevel warning -i pipe:0 /tmp/recording.flac',

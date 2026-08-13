@@ -1,5 +1,5 @@
 #!/bin/sh
-# gr-nut M3 example checker: prove the video path is byte-exact.
+# gr-nut example checker: prove the video path is byte-exact.
 #
 # Pipes a deterministic ffmpeg test pattern (testsrc2) through the NUT
 # contract into video_to_file.py, then renders the same pattern directly

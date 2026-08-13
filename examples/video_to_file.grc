@@ -5,7 +5,7 @@ options:
     category: '[GRC Hier Blocks]'
     comment: ''
     copyright: ''
-    description: 'M3 video path validation: NUT video ingest -> raw rgb24 frame dump
+    description: 'video path validation: NUT video ingest -> raw rgb24 frame dump
     to a file. No modulator, no display; use video_check.sh to verify the dump
     byte-exactly against ffmpeg.'
     gen_linking: dynamic
@@ -22,7 +22,7 @@ options:
     run_options: run
     sizing_mode: fixed
     thread_safe_setters: ''
-    title: gr-nut M3 video-to-file dump
+    title: gr-nut video-to-file dump
     window_size: (1000,1000)
   states:
     bus_sink: false
