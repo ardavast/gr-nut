@@ -22,10 +22,10 @@ demodulators are ordinary flowgraphs built from stock GR blocks (see
 Why this split: ffmpeg already decodes anything, scales anything, and
 repairs broken timing (variable frame rates, drifting sample clocks) —
 so it does, conforming arbitrary media to one strict raw profile per
-run. GNU Radio never sees a codec. The flowgraph sink (SDR, audio
-device) is the only clock in the chain: no Throttle blocks, no `-re`;
-ffmpeg is paced purely by pipe backpressure and idles at ~zero CPU while
-streaming.
+run. GNU Radio never sees a codec. Each chain has at most one clock —
+the SDR or audio device at whichever end has one: no Throttle blocks,
+no `-re`; ffmpeg is paced purely by pipe backpressure and idles at
+~zero CPU while streaming.
 
 ## Quick start
 
